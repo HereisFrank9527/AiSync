@@ -1,0 +1,177 @@
+/* ── SettingsPanel ── */
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm) var(--space-lg);
+  border-bottom: 1px solid var(--color-border);
+  min-height: 44px;
+  flex-shrink: 0;
+}
+
+.settings-header h2 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+}
+
+.settings-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg);
+}
+
+.settings-section {
+  max-width: var(--content-max-width);
+  margin: 0 auto var(--space-xl);
+}
+
+.settings-section h3 {
+  margin: 0 0 var(--space-md);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* ── Preset bar ── */
+
+.preset-bar {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.preset-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.preset-new-row {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+  margin-top: var(--space-sm);
+}
+
+.preset-new-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-hint {
+  margin: var(--space-sm) 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+/* ── Form fields ── */
+
+.settings-field {
+  margin-bottom: var(--space-md);
+}
+
+.settings-field label {
+  display: block;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-xs);
+}
+
+.settings-field input,
+.settings-field select {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  background: var(--color-bg);
+}
+
+.settings-field input:focus,
+.settings-field select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.settings-field input:disabled,
+.settings-field select:disabled,
+.settings-textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Textarea ── */
+
+.settings-textarea {
+  width: 100%;
+  padding: var(--space-sm) 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+  background: var(--color-bg);
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.settings-textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+/* ── Checkbox ── */
+
+.settings-checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.settings-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-accent);
+}
+
+.settings-checkbox input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+}
+
+/* ── Actions ── */
+
+.settings-actions {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-lg);
+}
+
+/* ── Message ── */
+
+.settings-msg {
+  margin-top: var(--space-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-success);
+}
+
+.settings-msg.error {
+  color: var(--color-danger);
+}
+
+.settings-loading {
+  padding: var(--space-lg);
+  text-align: center;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+}

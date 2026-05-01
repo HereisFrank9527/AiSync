@@ -1,0 +1,119 @@
+/* ── ChatPanel ── */
+
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* 顶栏 */
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm) var(--space-lg);
+  border-bottom: 1px solid var(--color-border);
+  min-height: 44px;
+  flex-shrink: 0;
+}
+
+.chat-header h2 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+}
+
+.chat-header-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+/* 消息列表 */
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.chat-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+/* 单条消息 */
+.chat-message {
+  max-width: var(--content-max-width);
+  width: 100%;
+  margin: 0 auto;
+}
+
+.chat-message-type {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  margin-bottom: var(--space-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.chat-message-body {
+  font-size: var(--font-size-base);
+  line-height: var(--line-height);
+  color: var(--color-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-message-hint {
+  margin-top: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  overflow-x: auto;
+}
+
+/* 输入区域 */
+.chat-input-area {
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-md) var(--space-lg);
+  flex-shrink: 0;
+}
+
+.chat-input-row {
+  display: flex;
+  gap: var(--space-sm);
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+}
+
+.chat-input-row textarea {
+  flex: 1;
+  min-height: 40px;
+  max-height: 200px;
+  resize: none;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height);
+  background: var(--color-bg);
+}
+
+.chat-input-row textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.chat-input-row button {
+  align-self: flex-end;
+  padding: var(--space-sm) var(--space-md);
+}

@@ -1,0 +1,140 @@
+/* ── Sidebar ── */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  width: var(--sidebar-width);
+  height: 100vh;
+  background: var(--color-sidebar-bg);
+  border-right: 1px solid var(--color-border);
+  padding: var(--space-sm) 0;
+  overflow-y: auto;
+  user-select: none;
+}
+
+/* 顶部 Logo */
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-xs);
+}
+
+.sidebar-header h1 {
+  margin: 0;
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* 连接状态 */
+.sidebar-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px var(--space-md);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.sidebar-status .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.sidebar-status.connected .dot {
+  background: var(--color-success);
+}
+
+.sidebar-status.connected {
+  color: var(--color-text-secondary);
+}
+
+/* 分隔线 */
+.sidebar-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: var(--space-sm) var(--space-md);
+}
+
+/* 导航项 */
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 var(--space-sm);
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 6px var(--space-sm);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+}
+
+.sidebar-item:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.sidebar-item.active {
+  background: var(--color-bg-active);
+  color: var(--color-text);
+}
+
+.sidebar-item .icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+/* 项目 ID 输入 */
+.sidebar-project {
+  padding: var(--space-sm) var(--space-md);
+}
+
+.sidebar-project label {
+  display: block;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  margin-bottom: var(--space-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sidebar-project input {
+  width: 100%;
+  padding: 4px var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  background: var(--color-bg);
+}
+
+.sidebar-project input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+/* 底部区域 */
+.sidebar-footer {
+  margin-top: auto;
+  padding: var(--space-sm) var(--space-md);
+}
