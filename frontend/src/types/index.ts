@@ -1,6 +1,11 @@
 /* ── 视图类型 ── */
 
-export type ViewId = "chat" | "tools" | "settings";
+export type ViewId = "chat" | "tools" | "settings" | "files";
+
+export interface ProjectInfo {
+  name: string;
+  path: string;
+}
 
 /* ── Agent 事件 ── */
 
@@ -8,6 +13,33 @@ export interface AgentEvent {
   type: string;
   content?: string;
   ui_hint?: Record<string, unknown>;
+  sender?: "user" | "agent";
+  conversation_id?: string;
+}
+
+/* ── 对话历史 ── */
+
+export interface ConversationMessage {
+  role: "user" | "agent";
+  content: string;
+  type: string;
+  created_at: string;
+}
+
+export interface Conversation {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  messages: ConversationMessage[];
+}
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
 }
 
 /* ── 工具 ── */

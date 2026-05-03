@@ -1,0 +1,45 @@
+.schema-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.schema-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.schema-field label {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.schema-field p {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.schema-field textarea {
+  resize: vertical;
+  min-height: 140px;
+}
+
+.schema-checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-weight: 400 !important;
+}
+
+.schema-checkbox input {
+  width: auto;
+}
+
+.schema-actions {
+  display: flex;
+  gap: var(--space-sm);
+  padding-top: var(--space-sm);
+}

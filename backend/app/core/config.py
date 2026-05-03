@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field
@@ -23,6 +24,13 @@ class Settings(BaseSettings):
     llm_prompt_cache: bool = True
 
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:1420", "http://localhost:5173"])
+
+    def project_path(self, project_id: str | None = None, project_path: str | None = None) -> Path:
+        if project_path:
+            return Path(project_path).expanduser().resolve()
+        if not project_id:
+            project_id = "demo"
+        return (Path(self.projects_root) / project_id).resolve()
 
 
 settings = Settings()

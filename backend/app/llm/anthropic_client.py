@@ -6,7 +6,7 @@ from typing import Any
 from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
 
 from app.core.config import Settings
-from app.llm.types import ChatRequest, ChatResponse
+from app.llm.types import ChatRequest, ChatResponse, TextDeltaCallback
 
 
 class AnthropicLLMClient:
@@ -21,7 +21,7 @@ class AnthropicLLMClient:
         self.client = AsyncAnthropic(**kwargs)
         self.settings = settings
 
-    async def chat(self, request: ChatRequest) -> ChatResponse:
+    async def chat(self, request: ChatRequest, on_text_delta: TextDeltaCallback = None) -> ChatResponse:
         params: dict[str, Any] = {
             "model": self.settings.llm_model_name,
             "max_tokens": request.max_tokens,
@@ -39,8 +39,14 @@ class AnthropicLLMClient:
 
         if request.stream:
             async with self.client.messages.stream(**params) as stream:
-                async for _ in stream:
-                    pass
+                async for event in stream:
+                    if on_text_delta:
+                        if getattr(event, "type", None) == "content_block_delta":
+                            delta = getattr(event, "delta", None)
+                            if delta and getattr(delta, "type", None) == "text_delta":
+                                text = getattr(delta, "text", "") or ""
+                                if text:
+                                    await on_text_delta(text)
                 response = await stream.get_final_message()
         else:
             response = await self.client.messages.create(**params)

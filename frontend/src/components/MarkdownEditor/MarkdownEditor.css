@@ -1,0 +1,16 @@
+.markdown-editor {
+  height: 100%;
+  min-height: 300px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.markdown-editor .cm-editor {
+  height: 100%;
+}
+
+.markdown-editor .cm-editor.cm-focused {
+  outline: none;
+  border-color: var(--color-accent);
+}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
@@ -21,6 +22,9 @@ class ChatResponse(BaseModel):
     raw: Any = None
 
 
+TextDeltaCallback = Callable[[str], Awaitable[None]] | None
+
+
 class LLMClient(Protocol):
-    async def chat(self, request: ChatRequest) -> ChatResponse:
+    async def chat(self, request: ChatRequest, on_text_delta: TextDeltaCallback = None) -> ChatResponse:
         ...

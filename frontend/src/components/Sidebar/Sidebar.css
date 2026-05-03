@@ -12,7 +12,6 @@
   user-select: none;
 }
 
-/* 顶部 Logo */
 .sidebar-header {
   display: flex;
   align-items: center;
@@ -28,7 +27,6 @@
   color: var(--color-text);
 }
 
-/* 连接状态 */
 .sidebar-status {
   display: flex;
   align-items: center;
@@ -54,14 +52,12 @@
   color: var(--color-text-secondary);
 }
 
-/* 分隔线 */
 .sidebar-divider {
   height: 1px;
   background: var(--color-border);
   margin: var(--space-sm) var(--space-md);
 }
 
-/* 导航项 */
 .sidebar-nav {
   display: flex;
   flex-direction: column;
@@ -105,7 +101,6 @@
   font-size: 14px;
 }
 
-/* 项目 ID 输入 */
 .sidebar-project {
   padding: var(--space-sm) var(--space-md);
 }
@@ -119,22 +114,20 @@
   letter-spacing: 0.05em;
 }
 
-.sidebar-project input {
-  width: 100%;
-  padding: 4px var(--space-sm);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+.sidebar-project-name {
   font-size: var(--font-size-sm);
-  background: var(--color-bg);
+  color: var(--color-text);
+  font-weight: 600;
+  margin-bottom: 4px;
 }
 
-.sidebar-project input:focus {
-  outline: none;
-  border-color: var(--color-accent);
+.sidebar-project-path {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  word-break: break-all;
+  margin-bottom: var(--space-sm);
 }
 
-/* 底部区域 */
-.sidebar-footer {
-  margin-top: auto;
-  padding: var(--space-sm) var(--space-md);
+.sidebar-project-action {
+  width: 100%;
 }

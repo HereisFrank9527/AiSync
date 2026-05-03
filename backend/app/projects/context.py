@@ -49,6 +49,12 @@ class ProjectContext:
         async with self._lock:
             return await asyncio.to_thread(path.exists)
 
+    async def ensure_dir(self, relative_path: str | Path) -> None:
+        """Create directory if it doesn't exist."""
+        path = self.resolve_path(relative_path)
+        async with self._lock:
+            await asyncio.to_thread(path.mkdir, parents=True, exist_ok=True)
+
     async def list_files(self, relative_dir: str | Path = ".") -> list[str]:
         directory = self.resolve_path(relative_dir)
         async with self._lock:
@@ -58,3 +64,51 @@ class ProjectContext:
                 return [str(path.relative_to(self.root)) for path in directory.rglob("*") if path.is_file()]
 
             return await asyncio.to_thread(scan)
+
+    async def init_structure(self) -> list[str]:
+        """Initialize the standard project directory structure. Returns list of created paths."""
+        created: list[str] = []
+
+        dirs = [
+            "world",
+            "characters",
+            "plot/arcs",
+            "chapters/vol-01",
+            "assets",
+            ".aisync/conversations",
+        ]
+        for d in dirs:
+            await self.ensure_dir(d)
+
+        initial_files: dict[str, str] = {
+            "project.yaml": (
+                "name: \"未命名项目\"\n"
+                "model:\n"
+                "  provider: anthropic\n"
+                "  api_base: null\n"
+                "  api_key_env: \"\"\n"
+                "  model_name: claude-sonnet-4-6\n"
+                "  parameters:\n"
+                "    temperature: 0.7\n"
+                "    max_tokens: 8192\n"
+            ),
+            "world/overview.md": "# 世界观概述\n\n",
+            "world/magic-system.md": "# 力量体系\n\n",
+            "world/geography.md": "# 地理\n\n",
+            "world/history.md": "# 历史\n\n",
+            "world/rules.yaml": "# 世界规则\n",
+            "characters/index.yaml": "# 角色索引\n",
+            "characters/relationships.json": "[]\n",
+            "plot/outline.md": "# 大纲\n\n",
+            "plot/timeline.json": "[]\n",
+            "assets/name-dictionary.yaml": "# 命名词典\n",
+            "assets/style-guide.md": "# 风格指南\n\n",
+            "operation.log": "",
+        }
+
+        for rel_path, content in initial_files.items():
+            if not await self.exists(rel_path):
+                await self.write_text(rel_path, content)
+                created.append(rel_path)
+
+        return created

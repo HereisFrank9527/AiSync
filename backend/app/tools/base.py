@@ -17,6 +17,7 @@ class ToolResult(BaseModel):
 class BaseTool(ABC):
     name: str
     description: str
+    has_frontend_ui: bool = True
     required_permissions: list[str] = []
 
     @abstractmethod
@@ -26,6 +27,24 @@ class BaseTool(ABC):
     @abstractmethod
     async def execute(self, params: dict[str, Any], context: ProjectContext) -> ToolResult:
         raise NotImplementedError
+
+    def ui_schema(self) -> dict[str, Any]:
+        return self.schema()
+
+    def build_prompt(self, params: dict[str, Any]) -> str:
+        return (
+            f"请使用 `{self.name}` 工具完成任务。\n"
+            f"工具说明：{self.description}\n"
+            f"参数：{params}"
+        )
+
+    def frontend_descriptor(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "has_frontend_ui": self.has_frontend_ui,
+            "ui_schema": self.ui_schema() if self.has_frontend_ui else None,
+        }
 
     def claude_schema(self) -> dict[str, Any]:
         schema = self.schema()

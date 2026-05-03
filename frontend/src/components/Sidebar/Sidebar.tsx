@@ -2,25 +2,28 @@ import type { ViewId } from "../../types";
 import "./Sidebar.css";
 
 interface SidebarProps {
-  projectId: string;
-  onProjectIdChange: (id: string) => void;
+  projectName: string;
+  projectPath: string;
   connected: boolean;
   activeView: ViewId;
   onViewChange: (view: ViewId) => void;
+  onSelectFolder: () => void;
 }
 
-const NAV_ITEMS: { id: ViewId; label: string; icon: string }[] = [
-  { id: "chat", label: "对话", icon: "💬" },
-  { id: "tools", label: "工具", icon: "🔧" },
-  { id: "settings", label: "设置", icon: "⚙️" },
+const NAV_ITEMS: { id: ViewId; label: string }[] = [
+  { id: "chat", label: "对话" },
+  { id: "files", label: "文件" },
+  { id: "tools", label: "工具" },
+  { id: "settings", label: "设置" },
 ];
 
 export default function Sidebar({
-  projectId,
-  onProjectIdChange,
+  projectName,
+  projectPath,
   connected,
   activeView,
   onViewChange,
+  onSelectFolder,
 }: SidebarProps) {
   return (
     <aside className="sidebar">
@@ -42,7 +45,6 @@ export default function Sidebar({
             className={`sidebar-item${activeView === item.id ? " active" : ""}`}
             onClick={() => onViewChange(item.id)}
           >
-            <span className="icon">{item.icon}</span>
             {item.label}
           </button>
         ))}
@@ -51,12 +53,12 @@ export default function Sidebar({
       <div className="sidebar-divider" />
 
       <div className="sidebar-project">
-        <label htmlFor="project-id">项目 ID</label>
-        <input
-          id="project-id"
-          value={projectId}
-          onChange={(e) => onProjectIdChange(e.target.value)}
-        />
+        <label>当前项目</label>
+        <div className="sidebar-project-name">{projectName || "未选择"}</div>
+        <div className="sidebar-project-path">{projectPath || "请选择项目文件夹"}</div>
+        <button className="btn-secondary sidebar-project-action" onClick={onSelectFolder}>
+          选择文件夹
+        </button>
       </div>
     </aside>
   );

@@ -1,0 +1,105 @@
+.file-tree {
+  display: flex;
+  flex-direction: column;
+}
+
+.file-tree-empty {
+  padding: var(--space-md);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+/* ── 目录节点 ── */
+
+.file-tree-dir-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 4px var(--space-sm);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.file-tree-dir-toggle:hover {
+  background: var(--color-bg-hover);
+}
+
+.file-tree-arrow {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.file-tree-arrow::before {
+  content: "";
+  display: block;
+  width: 0;
+  height: 0;
+  border-left: 4px solid var(--color-text-secondary);
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  transform: translateY(3px);
+}
+
+.file-tree-arrow.open::before {
+  transform: translateY(5px) rotate(90deg);
+}
+
+.file-tree-dir-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree-dir-children {
+  padding-left: 16px;
+}
+
+.file-tree-empty-dir {
+  padding: 2px var(--space-sm) 2px 32px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+/* ── 文件节点 ── */
+
+.file-tree-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 28px;
+  padding: 3px var(--space-sm) 3px 32px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  text-align: left;
+}
+
+.file-tree-item:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.file-tree-item.active {
+  background: var(--color-bg-active);
+  color: var(--color-text);
+}
+
+.file-tree-item:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.file-tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+}

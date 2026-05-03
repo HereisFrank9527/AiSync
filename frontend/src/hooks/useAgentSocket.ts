@@ -1,21 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentEvent } from "../types";
 
-export function useAgentSocket(projectId: string) {
+export function useAgentSocket(
+  projectPath: string | null,
+  conversationId: string | null,
+  onConversationIdChange?: (conversationId: string) => void,
+) {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [connected, setConnected] = useState(false);
   const presetRef = useRef<string | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectPath) {
+      setEvents([]);
+      return;
+    }
 
     let closedByEffect = false;
     let reconnectTimer: number | null = null;
     let attempt = 0;
 
     const connect = () => {
-      const socket = new WebSocket(`ws://localhost:8000/api/agent/${projectId}/ws`);
+      const encodedPath = encodeURIComponent(projectPath);
+      const socket = new WebSocket(`ws://localhost:8000/api/agent/current/ws?project_path=${encodedPath}`);
       socketRef.current = socket;
 
       socket.onopen = () => {
@@ -32,7 +40,13 @@ export function useAgentSocket(projectId: string) {
       socket.onerror = () => setConnected(false);
       socket.onmessage = (message) => {
         try {
-          setEvents((current) => [...current, JSON.parse(message.data)].slice(-200));
+          const event = JSON.parse(message.data) as AgentEvent;
+          if (event.type === "conversation" && event.conversation_id) {
+            onConversationIdChange?.(event.conversation_id);
+            return;
+          }
+          if (!event.sender) event.sender = "agent";
+          setEvents((current) => [...current, event].slice(-200));
         } catch {
           setEvents((current) => [
             ...current,
@@ -51,25 +65,34 @@ export function useAgentSocket(projectId: string) {
       socketRef.current = null;
       setConnected(false);
     };
-  }, [projectId]);
+  }, [onConversationIdChange, projectPath]);
 
-  /** Keep preset ref in sync without re-creating callbacks. */
   const setPresetId = useCallback((id: string | null) => {
     presetRef.current = id;
   }, []);
+
+  const setHistory = useCallback((history: AgentEvent[]) => {
+    setEvents(history.slice(-200));
+  }, []);
+
+  const clearEvents = useCallback(() => setEvents([]), []);
 
   const send = useCallback(
     (content: string) => {
       const payload: Record<string, unknown> = { type: "user_message", content };
       if (presetRef.current) payload.preset_id = presetRef.current;
+      if (conversationId) payload.conversation_id = conversationId;
       socketRef.current?.send(JSON.stringify(payload));
+      setEvents((current) =>
+        [...current, { type: "user_message", content, sender: "user" as const }].slice(-200),
+      );
     },
-    [],
+    [conversationId],
   );
 
   const interrupt = useCallback(() => {
     socketRef.current?.send(JSON.stringify({ type: "interrupt" }));
   }, []);
 
-  return { connected, events, send, interrupt, setPresetId };
+  return { connected, events, send, interrupt, setPresetId, setHistory, clearEvents };
 }

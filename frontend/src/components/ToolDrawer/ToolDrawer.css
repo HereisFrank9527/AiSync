@@ -1,0 +1,49 @@
+.tool-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.tool-description,
+.tool-muted {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.tool-error {
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  background: #fdf0f0;
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+}
+
+.tool-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--color-border);
+}
+
+.tool-result h3 {
+  margin: 0;
+  font-size: var(--font-size-base);
+}
+
+.tool-result pre {
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono);
+}
+
+.tool-result-editor {
+  height: 400px;
+}
+

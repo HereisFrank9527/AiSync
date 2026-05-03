@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
-from app.llm.types import ChatRequest, LLMClient
+from app.llm.types import ChatRequest, LLMClient, TextDeltaCallback
+from app.conversations.store import ConversationStore
 from app.projects.context import ProjectContext
 from app.tools.base import ToolResult
 from app.tools.registry import ToolRegistry
@@ -35,7 +37,7 @@ class MasterAgent:
         self.system_prompt = system_prompt or SYSTEM_PROMPT
         self._interrupted = False
 
-    async def run(self, user_input: str) -> str:
+    async def run(self, user_input: str, on_text_delta: TextDeltaCallback = None) -> str:
         relevant_context = await self.vector_store.query(user_input)
         messages: list[dict[str, Any]] = [
             {"role": "user", "content": self._build_user_content(user_input, relevant_context)}
@@ -52,7 +54,8 @@ class MasterAgent:
                     tools=self.tools.get_all_schemas(),
                     system=self.system_prompt,
                     stream=True,
-                )
+                ),
+                on_text_delta=on_text_delta,
             )
 
             if not response.tool_calls:

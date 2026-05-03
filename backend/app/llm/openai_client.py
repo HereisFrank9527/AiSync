@@ -7,7 +7,7 @@ from typing import Any
 from openai import AsyncOpenAI, OpenAIError
 
 from app.core.config import Settings
-from app.llm.types import ChatRequest, ChatResponse
+from app.llm.types import ChatRequest, ChatResponse, TextDeltaCallback
 
 
 class OpenAICompatibleLLMClient:
@@ -23,38 +23,81 @@ class OpenAICompatibleLLMClient:
         self.client = AsyncOpenAI(api_key=api_key, base_url=settings.llm_api_base)
         self.settings = settings
 
-    async def chat(self, request: ChatRequest) -> ChatResponse:
+    async def chat(self, request: ChatRequest, on_text_delta: TextDeltaCallback = None) -> ChatResponse:
         messages = self._prepare_messages(request.messages)
         if request.system:
             system_text = self._system_to_text(request.system)
             messages = [{"role": "system", "content": system_text}, *messages]
 
         tools_param = [self._to_openai_tool(t) for t in request.tools] if request.tools else None
-        response = await self.client.chat.completions.create(
-            model=self.settings.llm_model_name,
-            messages=messages,
-            tools=tools_param,
-            max_tokens=request.max_tokens,
-            stream=False,
-        )
-        message = response.choices[0].message
-        # Normalize tool_calls to unified dict format: {id, name, input}
-        normalized: list[dict[str, Any]] = []
-        for tc in message.tool_calls or []:
-            args_str = tc.function.arguments or "{}"
-            try:
-                args = json.loads(args_str)
-            except (json.JSONDecodeError, TypeError):
-                args = {}
-            normalized.append({"id": tc.id, "name": tc.function.name, "input": args})
 
-        return ChatResponse(
-            content=[message.model_dump()],
-            text=message.content or "",
-            tool_calls=normalized,
-            stop_reason=response.choices[0].finish_reason,
-            raw=response,
-        )
+        if request.stream and on_text_delta:
+            response = await self.client.chat.completions.create(
+                model=self.settings.llm_model_name,
+                messages=messages,
+                tools=tools_param,
+                max_tokens=request.max_tokens,
+                stream=True,
+            )
+            chunks: list[Any] = []
+            tool_call_buffers: dict[int, dict[str, Any]] = {}
+            text_parts: list[str] = []
+            async for chunk in response:
+                chunks.append(chunk)
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta and delta.content:
+                    text_parts.append(delta.content)
+                    await on_text_delta(delta.content)
+                if delta and delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        idx = tc.index
+                        if idx not in tool_call_buffers:
+                            tool_call_buffers[idx] = {"id": tc.id or "", "name": "", "arguments": ""}
+                        if tc.id:
+                            tool_call_buffers[idx]["id"] = tc.id
+                        if tc.function:
+                            if tc.function.name:
+                                tool_call_buffers[idx]["name"] += tc.function.name
+                            if tc.function.arguments:
+                                tool_call_buffers[idx]["arguments"] += tc.function.arguments
+            normalized: list[dict[str, Any]] = []
+            for buf in tool_call_buffers.values():
+                try:
+                    args = json.loads(buf["arguments"] or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    args = {}
+                normalized.append({"id": buf["id"], "name": buf["name"], "input": args})
+            return ChatResponse(
+                content=chunks,
+                text="".join(text_parts),
+                tool_calls=normalized,
+                stop_reason=None,
+                raw=chunks,
+            )
+        else:
+            response = await self.client.chat.completions.create(
+                model=self.settings.llm_model_name,
+                messages=messages,
+                tools=tools_param,
+                max_tokens=request.max_tokens,
+                stream=False,
+            )
+            message = response.choices[0].message
+            normalized: list[dict[str, Any]] = []
+            for tc in message.tool_calls or []:
+                args_str = tc.function.arguments or "{}"
+                try:
+                    args = json.loads(args_str)
+                except (json.JSONDecodeError, TypeError):
+                    args = {}
+                normalized.append({"id": tc.id, "name": tc.function.name, "input": args})
+            return ChatResponse(
+                content=[message.model_dump()],
+                text=message.content or "",
+                tool_calls=normalized,
+                stop_reason=response.choices[0].finish_reason,
+                raw=response,
+            )
 
     def _prepare_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Convert agent-internal (Anthropic-style) messages to OpenAI chat format.

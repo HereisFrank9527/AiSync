@@ -7,12 +7,15 @@ that can be switched at runtime without restarting the backend.
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 # ── Data models ──────────────────────────────────────────────────────
@@ -77,7 +80,7 @@ BUILTIN_PRESETS: list[Preset] = [
 
 # ── JSON file storage ────────────────────────────────────────────────
 
-_DEFAULT_STORE_PATH = Path("presets.json")
+_DEFAULT_STORE_PATH = Path.home() / ".aisync" / "presets.json"
 
 
 class PresetStore:
@@ -143,10 +146,13 @@ class PresetStore:
             for item in raw:
                 preset = Preset.model_validate(item)
                 self._cache[preset.id] = preset
-        except (json.JSONDecodeError, Exception):
-            pass  # corrupted file -> start fresh
+        except json.JSONDecodeError as exc:
+            logger.warning("presets.json is corrupted, starting fresh: %s", exc)
+        except Exception as exc:
+            logger.warning("Failed to load presets: %s", exc)
 
     def _save(self) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
         data = [p.model_dump() for p in self._cache.values()]
         self._path.write_text(
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"

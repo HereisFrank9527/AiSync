@@ -1,0 +1,40 @@
+.file-view,
+.file-view-empty {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.file-view-empty {
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+}
+
+.file-view-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+.file-view-header h2 {
+  margin: 0;
+  font-size: var(--font-size-xl);
+}
+
+.file-view-header p {
+  margin: 2px 0 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.file-view-editor {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-md);
+  background: var(--color-bg-secondary);
+}

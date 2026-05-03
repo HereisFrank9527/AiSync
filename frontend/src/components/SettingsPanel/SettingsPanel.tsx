@@ -33,6 +33,7 @@ export default function SettingsPanel({
   const [behavior, setBehavior] = useState<AgentBehavior | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [isError, setIsError] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");
 
@@ -41,6 +42,7 @@ export default function SettingsPanel({
     setLlm({ ...activePreset.llm });
     setBehavior({ ...activePreset.behavior });
     setMessage("");
+    setIsError(false);
   }, [activePreset]);
 
   if (!activePreset || !llm || !behavior) {
@@ -58,8 +60,11 @@ export default function SettingsPanel({
     setMessage("");
     try {
       await onUpdate(activePreset.id, { llm, behavior });
+      setIsError(false);
       setMessage("已保存");
+      setTimeout(() => setMessage(""), 3000);
     } catch {
+      setIsError(true);
       setMessage("保存失败");
     } finally {
       setSaving(false);
@@ -74,15 +79,18 @@ export default function SettingsPanel({
       setNewName("");
       setShowNew(false);
     } catch {
+      setIsError(true);
       setMessage("创建失败");
     }
   };
 
   const handleDelete = async () => {
     if (readonly) return;
+    if (!window.confirm(`确定删除预设「${activePreset.name}」？`)) return;
     try {
       await onDelete(activePreset.id);
     } catch {
+      setIsError(true);
       setMessage("删除失败");
     }
   };
@@ -282,7 +290,9 @@ export default function SettingsPanel({
                 重置
               </button>
             </div>
-            {message && <p className="settings-msg">{message}</p>}
+            {message && (
+              <p className={`settings-msg${isError ? " error" : ""}`}>{message}</p>
+            )}
           </div>
         )}
       </div>
