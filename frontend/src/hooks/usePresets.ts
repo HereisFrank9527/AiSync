@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
-import type { Preset, PresetCreate, PresetUpdate } from "../types";
+import type { LLMParams, ModelListResponse, Preset, PresetCopy, PresetCreate, PresetUpdate } from "../types";
 
 const BUILTIN_IDS = new Set(["default"]);
 const STORAGE_KEY = "aisync:active_preset_id";
@@ -56,6 +56,20 @@ export function usePresets() {
     [refresh],
   );
 
+  const copy = useCallback(
+    async (id: string, data: PresetCopy = {}) => {
+      const created = await api.post<Preset>(`/presets/${id}/copy`, data);
+      await refresh();
+      setActiveId(created.id);
+      return created;
+    },
+    [refresh, setActiveId],
+  );
+
+  const listModels = useCallback(async (llm: LLMParams) => {
+    return api.post<ModelListResponse>("/presets/models", llm);
+  }, []);
+
   const remove = useCallback(
     async (id: string) => {
       await api.del(`/presets/${id}`);
@@ -75,7 +89,9 @@ export function usePresets() {
     error,
     setActiveId,
     create,
+    copy,
     update,
+    listModels,
     remove,
     refresh,
     isBuiltin,

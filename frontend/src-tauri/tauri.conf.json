@@ -1,18 +1,18 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "AiSync",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "identifier": "com.aisync.app",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "powershell -ExecutionPolicy Bypass -File ../scripts/tauri_dev.ps1",
+    "beforeBuildCommand": "powershell -ExecutionPolicy Bypass -File ../scripts/tauri_build.ps1",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
-        "title": "AiSync",
+        "title": "AiSync 0.1.4",
         "width": 1280,
         "height": 800
       }
@@ -20,6 +20,12 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all"
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "targets": "all",
+    "resources": {
+      "resources/backend/": "backend/"
+    }
   }
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FileNode } from "../../hooks/useFileTree";
 import "./FileTree.css";
 
@@ -17,7 +17,15 @@ function TreeNode({
   activePath: string | null;
   onOpenFile: (path: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const containsActivePath = useMemo(() => {
+    if (!activePath) return false;
+    return activePath === node.path || activePath.startsWith(`${node.path}/`);
+  }, [activePath, node.path]);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    if (containsActivePath) setExpanded(true);
+  }, [containsActivePath]);
 
   if (node.isDir) {
     return (

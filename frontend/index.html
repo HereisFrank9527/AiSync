@@ -6,7 +6,36 @@
     <title>AiSync</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="boot-fallback" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; padding: 24px; color: #37352f;">
+        <h1 style="margin: 0 0 8px; font-size: 18px;">AiSync 0.1.4 starting</h1>
+        <p style="margin: 0; color: #787774;">如果这行文字一直不变，说明前端脚本没有加载。</p>
+      </div>
+    </div>
+    <script>
+      (function () {
+        function escapeHtml(value) {
+          return String(value).replace(/[&<>"']/g, function (char) {
+            return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char];
+          });
+        }
+        function showBootError(message) {
+          var root = document.getElementById("root");
+          if (!root) return;
+          root.innerHTML =
+            '<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;padding:24px;color:#37352f;white-space:pre-wrap;">' +
+            '<h1 style="margin:0 0 8px;font-size:18px;color:#e03e3e;">AiSync frontend failed to start</h1>' +
+            "<div>" + escapeHtml(message) + "</div></div>";
+        }
+        window.addEventListener("error", function (event) {
+          showBootError(event.message || event.error || "Unknown script error");
+        });
+        window.addEventListener("unhandledrejection", function (event) {
+          var reason = event.reason;
+          showBootError(reason && reason.stack ? reason.stack : reason || "Unknown async error");
+        });
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

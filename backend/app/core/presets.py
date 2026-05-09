@@ -60,6 +60,10 @@ class PresetCreate(BaseModel):
     behavior: AgentBehavior | None = None
 
 
+class PresetCopy(BaseModel):
+    name: str | None = None
+
+
 class PresetUpdate(BaseModel):
     name: str | None = None
     llm: LLMParams | None = None
@@ -105,6 +109,19 @@ class PresetStore:
             name=data.name,
             llm=data.llm or LLMParams(),
             behavior=data.behavior or AgentBehavior(),
+        )
+        self._cache[preset.id] = preset
+        self._save()
+        return preset
+
+    def copy(self, preset_id: str, name: str | None = None) -> Preset | None:
+        source = self.get(preset_id)
+        if not source:
+            return None
+        preset = Preset(
+            name=name or f"{source.name} 副本",
+            llm=source.llm.model_copy(deep=True),
+            behavior=source.behavior.model_copy(deep=True),
         )
         self._cache[preset.id] = preset
         self._save()

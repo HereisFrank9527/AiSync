@@ -1,20 +1,29 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api/client";
 import ChatPanel from "./components/ChatPanel";
 import ConversationList from "./components/ConversationList";
 import FileTree from "./components/FileTree";
 import FileView from "./components/FileView";
+import OverviewPanel from "./components/OverviewPanel";
 import Sidebar from "./components/Sidebar";
 import SettingsPanel from "./components/SettingsPanel";
 import ToolDrawer from "./components/ToolDrawer";
 import ToolsPanel from "./components/ToolsPanel";
+import VectorPanel from "./components/VectorPanel";
 import { useAgentSocket } from "./hooks/useAgentSocket";
+import { useCharacters } from "./hooks/useCharacters";
+import { useChapters } from "./hooks/useChapters";
 import { useConversations } from "./hooks/useConversations";
 import { useFileTree } from "./hooks/useFileTree";
+import { useOutline } from "./hooks/useOutline";
 import { usePresets } from "./hooks/usePresets";
 import { useProject } from "./hooks/useProject";
+import { useProjectOverview, withProjectName } from "./hooks/useProjectOverview";
 import { useTools } from "./hooks/useTools";
-import type { AgentEvent, ConversationMessage, ToolDescriptor, ViewId } from "./types";
+import { useVectorIndex } from "./hooks/useVectorIndex";
+import { useWorldview } from "./hooks/useWorldview";
+import type { AgentEvent, ConversationMessage, ToolDescriptor, ToolRunRecord, ToolWorkspaceView, ViewId } from "./types";
+import { renderRegisteredWorkspaceView, supportedWorkspaceViewIds } from "./workspaceViews";
 import "./style.css";
 
 function conversationMessagesToEvents(messages: ConversationMessage[]): AgentEvent[] {
@@ -26,27 +35,57 @@ function conversationMessagesToEvents(messages: ConversationMessage[]): AgentEve
 }
 
 function App() {
-  const { project, selectFolder } = useProject();
-  const [activeView, setActiveView] = useState<ViewId>("chat");
+  const { project, setProject, selectFolder } = useProject();
+  const [activeView, setActiveView] = useState<ViewId>("overview");
   const [input, setInput] = useState("");
   const [selectedTool, setSelectedTool] = useState<ToolDescriptor | null>(null);
+  const [selectedToolRun, setSelectedToolRun] = useState<ToolRunRecord | null>(null);
+  const [toolInitialParams, setToolInitialParams] = useState<Record<string, unknown> | null>(null);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [selectedFileContent, setSelectedFileContent] = useState("");
   const [fileSaving, setFileSaving] = useState(false);
   const [showConversations, setShowConversations] = useState(false);
   const projectInitRef = useRef<string | null>(null);
 
+  const handleProjectNameChange = useCallback((name: string) => {
+    setProject((current) => current && current.name !== name ? withProjectName(current, name) : current);
+  }, [setProject]);
+
   const conversations = useConversations(project?.path ?? null);
   const fileTree = useFileTree(project?.path ?? null);
+  const overview = useProjectOverview(project?.path ?? null, handleProjectNameChange);
+  const chapters = useChapters(project?.path ?? null);
+  const outline = useOutline(project?.path ?? null);
+  const characters = useCharacters(project?.path ?? null);
+  const worldview = useWorldview(project?.path ?? null);
   const presets = usePresets();
   const tools = useTools(project?.path ?? null, presets.activeId);
+  const vectorIndex = useVectorIndex(project?.path ?? null);
+  const implementedToolViewIds = useMemo(() => supportedWorkspaceViewIds(), []);
+  const toolViews = useMemo<ToolWorkspaceView[]>(() => {
+    const views = tools.tools
+      .map((tool) => tool.workspace_view)
+      .filter((view): view is ToolWorkspaceView => Boolean(view));
+    const unique = new Map<ViewId, ToolWorkspaceView>();
+    for (const view of views) {
+      if (implementedToolViewIds.has(view.view_id as ViewId)) unique.set(view.view_id as ViewId, view);
+    }
+    return [...unique.values()];
+  }, [implementedToolViewIds, tools.tools]);
+  const activeToolView = toolViews.find((view) => view.view_id === activeView);
+
+  useEffect(() => {
+    if (implementedToolViewIds.has(activeView) && !tools.loading && !activeToolView) {
+      setActiveView("tools");
+    }
+  }, [activeToolView, activeView, implementedToolViewIds, tools.loading]);
 
   const handleConversationIdChange = useCallback((conversationId: string) => {
     conversations.setActiveConversationId(conversationId);
     void conversations.refresh();
   }, [conversations.refresh, conversations.setActiveConversationId]);
 
-  const { connected, events, send, interrupt, setPresetId, setHistory, clearEvents } =
+  const { connected, events, historyVersion, send, interrupt, setPresetId, setHistory, clearEvents } =
     useAgentSocket(project?.path ?? null, conversations.activeConversationId, handleConversationIdChange);
 
   useEffect(() => {
@@ -66,7 +105,6 @@ function App() {
     setSelectedFilePath(null);
     setSelectedFileContent("");
     conversations.setActiveConversation(null);
-    conversations.setActiveConversationId(null);
     void conversations.refresh();
     api.post("/projects/init", { project_path: project.path })
       .then(() => fileTree.refresh())
@@ -79,6 +117,7 @@ function App() {
     if (!project?.path) return;
     if (conversations.activeConversationId) return;
     if (conversations.loading) return;
+    if (conversations.loadedProjectPath !== project.path) return;
     if (initializedRef.current) return;
     if (conversations.items.length > 0) {
       initializedRef.current = true;
@@ -135,10 +174,11 @@ function App() {
         content: selectedFileContent,
       });
       await fileTree.refresh();
+      void vectorIndex.refresh();
     } finally {
       setFileSaving(false);
     }
-  }, [fileTree.refresh, project?.path, selectedFileContent, selectedFilePath]);
+  }, [fileTree.refresh, project?.path, selectedFileContent, selectedFilePath, vectorIndex.refresh]);
 
   return (
     <div className="app-shell">
@@ -147,6 +187,7 @@ function App() {
         projectPath={project?.path ?? ""}
         connected={connected}
         activeView={activeView}
+        toolViews={toolViews}
         onViewChange={setActiveView}
         onSelectFolder={() => void selectFolder()}
       />
@@ -168,7 +209,9 @@ function App() {
             <div className="chat-workspace-main">
               <ChatPanel
                 events={events}
+                historyVersion={historyVersion}
                 connected={connected}
+                tools={tools.tools}
                 onSend={send}
                 onInterrupt={interrupt}
                 input={input}
@@ -178,6 +221,18 @@ function App() {
               />
             </div>
           </div>
+        )}
+
+        {activeView === "overview" && (
+          <OverviewPanel
+            overview={overview.overview}
+            loading={overview.loading}
+            saving={overview.saving}
+            error={overview.error}
+            onRefresh={overview.refresh}
+            onSave={overview.save}
+            onOpenFile={handleOpenFile}
+          />
         )}
 
         {activeView === "files" && (
@@ -205,6 +260,52 @@ function App() {
           </div>
         )}
 
+        {activeView === "vector" && (
+          <VectorPanel
+            status={vectorIndex.status}
+            results={vectorIndex.results}
+            loading={vectorIndex.loading}
+            rebuilding={vectorIndex.rebuilding}
+            searching={vectorIndex.searching}
+            error={vectorIndex.error}
+            onRefresh={vectorIndex.refresh}
+            onRebuild={vectorIndex.rebuild}
+            onSearch={vectorIndex.search}
+            onOpenFile={handleOpenFile}
+          />
+        )}
+
+        {activeToolView && renderRegisteredWorkspaceView(activeToolView.view_id as ViewId, {
+          outline,
+          chapters: {
+            ...chapters,
+            saveDocument: async (path, content) => {
+              await chapters.saveDocument(path, content);
+              void overview.refresh();
+              void fileTree.refresh();
+              void vectorIndex.refresh();
+            },
+            saveMetadata: async (path, metadata) => {
+              await chapters.saveMetadata(path, metadata);
+              void overview.refresh();
+            },
+          },
+          characters,
+          worldview,
+          vector: {
+            status: vectorIndex.status,
+            results: vectorIndex.results,
+            searching: vectorIndex.searching,
+            rebuilding: vectorIndex.rebuilding,
+            error: vectorIndex.error,
+            search: vectorIndex.search,
+            rebuild: vectorIndex.rebuild,
+          },
+          tools: tools.tools,
+          openTool: (tool, initialParams) => { setSelectedTool(tool); setSelectedToolRun(null); setToolInitialParams(initialParams ?? null); },
+          openFile: handleOpenFile,
+        })}
+
         {activeView === "settings" && presets.loading && (
           <div className="view-status view-status--loading">加载预设中…</div>
         )}
@@ -218,30 +319,77 @@ function App() {
             activePreset={presets.activePreset}
             onSelect={presets.setActiveId}
             onCreate={presets.create}
+            onCopy={presets.copy}
             onUpdate={presets.update}
+            onListModels={presets.listModels}
             onDelete={presets.remove}
             isBuiltin={presets.isBuiltin}
+            tools={tools.tools}
           />
         )}
 
         {activeView === "tools" && (
           <ToolsPanel
             tools={tools.tools}
+            runs={tools.runs}
             loading={tools.loading}
             error={tools.error}
-            onSelect={setSelectedTool}
+            onRefresh={tools.refresh}
+            onSelect={(tool) => { setSelectedTool(tool); setSelectedToolRun(null); setToolInitialParams(null); }}
+            onSelectRun={(run) => { setSelectedTool(null); setSelectedToolRun(run); setToolInitialParams(null); tools.clearResult(); }}
+            onReuseRun={(run) => {
+              const tool = tools.tools.find((item) => item.name === run.tool_name);
+              if (!tool) return;
+              setSelectedTool(tool);
+              setSelectedToolRun(null);
+              setToolInitialParams(run.params);
+              tools.clearResult();
+            }}
           />
         )}
       </main>
 
       <ToolDrawer
         tool={selectedTool}
-        result={tools.result}
+        run={selectedToolRun ?? tools.result}
+        initialParams={toolInitialParams}
         error={tools.error}
         running={tools.running}
-        onClose={() => setSelectedTool(null)}
-        onExecute={tools.execute}
-        onInvoke={tools.invoke}
+        presets={presets.presets}
+        activePresetId={presets.activeId}
+        onClose={() => { setSelectedTool(null); setSelectedToolRun(null); setToolInitialParams(null); tools.clearResult(); }}
+        onExecute={async (name, params) => {
+          const result = await tools.execute(name, params);
+          if (name === "write_chapter" || name === "edit_chapter") {
+            void overview.refresh();
+            void chapters.refresh();
+            void fileTree.refresh();
+            void vectorIndex.refresh();
+          }
+          if (name === "outline_generate") void outline.refresh();
+          if (name === "create_character") void characters.refresh();
+          if (name === "update_worldview") void worldview.refresh();
+          if (name === "update_worldview" || name === "create_character" || name === "outline_generate") void vectorIndex.refresh();
+          return result;
+        }}
+        onInvoke={async (name, params, presetId) => {
+          const result = await tools.invoke(name, params, presetId);
+          if (name === "write_chapter" || name === "edit_chapter") {
+            void overview.refresh();
+            void chapters.refresh();
+            void fileTree.refresh();
+            void vectorIndex.refresh();
+          }
+          if (name === "outline_generate") void outline.refresh();
+          if (name === "create_character") void characters.refresh();
+          if (name === "update_worldview") void worldview.refresh();
+          if (name === "update_worldview" || name === "create_character" || name === "outline_generate") void vectorIndex.refresh();
+          return result;
+        }}
+        onUpdateDefaultPreset={async (name, presetId) => {
+          await tools.updateDefaultPreset(name, presetId);
+          setSelectedTool((current) => current?.name === name ? { ...current, default_preset_id: presetId } : current);
+        }}
       />
     </div>
   );

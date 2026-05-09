@@ -9,6 +9,7 @@ export function useConversations(projectPath: string | null) {
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [activeConversationId, setActiveConversationIdState] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadedProjectPath, setLoadedProjectPath] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   const storageKey = useMemo(
@@ -32,6 +33,7 @@ export function useConversations(projectPath: string | null) {
       setItems([]);
       setActiveConversation(null);
       setActiveConversationId(null);
+      setLoadedProjectPath(null);
       return;
     }
 
@@ -39,8 +41,10 @@ export function useConversations(projectPath: string | null) {
     try {
       const list = await api.get<ConversationSummary[]>(`/conversations?project_path=${encodeURIComponent(projectPath)}`);
       setItems(list);
+      setLoadedProjectPath(projectPath);
       setError("");
     } catch {
+      setLoadedProjectPath(projectPath);
       setError("无法加载对话历史");
     } finally {
       setLoading(false);
@@ -86,6 +90,7 @@ export function useConversations(projectPath: string | null) {
     activeConversation,
     activeConversationId,
     loading,
+    loadedProjectPath,
     error,
     refresh,
     create,

@@ -5,6 +5,7 @@ type JsonSchema = {
   type?: string;
   properties?: Record<string, JsonSchema & { description?: string }>;
   required?: string[];
+  title?: string;
   default?: unknown;
   enum?: unknown[];
   description?: string;
@@ -13,6 +14,8 @@ type JsonSchema = {
 interface SchemaFormProps {
   schema: JsonSchema;
   disabled?: boolean;
+  actionsDisabled?: boolean;
+  values?: Record<string, unknown> | null;
   onSubmit: (values: Record<string, unknown>) => void;
   submitLabel: string;
   secondaryLabel?: string;
@@ -36,9 +39,21 @@ function normalizeValue(field: JsonSchema, value: unknown) {
   return value;
 }
 
+function humanizeKey(key: string) {
+  return key
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function fieldLabel(key: string, field: JsonSchema, required: boolean) {
+  return `${field.title ?? humanizeKey(key)}${required ? " *" : ""}`;
+}
+
 export default function SchemaForm({
   schema,
   disabled,
+  actionsDisabled,
+  values: externalValues,
   onSubmit,
   submitLabel,
   secondaryLabel,
@@ -47,8 +62,8 @@ export default function SchemaForm({
   const [values, setValues] = useState<Record<string, unknown>>(() => initialValues(schema));
 
   useEffect(() => {
-    setValues(initialValues(schema));
-  }, [schema]);
+    setValues({ ...initialValues(schema), ...(externalValues ?? {}) });
+  }, [externalValues, schema]);
 
   const required = new Set(schema.required ?? []);
   const normalized = () => {
@@ -65,7 +80,6 @@ export default function SchemaForm({
   };
 
   const renderField = (key: string, field: JsonSchema) => {
-    const label = `${key}${required.has(key) ? " *" : ""}`;
     const value = values[key];
 
     if (field.enum?.length) {
@@ -75,6 +89,7 @@ export default function SchemaForm({
           disabled={disabled}
           onChange={(e) => setValues((current) => ({ ...current, [key]: e.target.value }))}
         >
+          {!required.has(key) && <option value="">未选择</option>}
           {field.enum.map((option) => (
             <option key={String(option)} value={String(option)}>
               {String(option)}
@@ -98,7 +113,7 @@ export default function SchemaForm({
       );
     }
 
-    if (key === "content" || field.type === "string" && String(value ?? "").length > 80) {
+    if (key === "content" || key === "profile" || field.type === "string" && String(value ?? "").length > 80) {
       return (
         <textarea
           rows={8}
@@ -129,21 +144,21 @@ export default function SchemaForm({
     >
       {Object.entries(schema.properties ?? {}).map(([key, field]) => (
         <div className="schema-field" key={key}>
-          <label>{`${key}${required.has(key) ? " *" : ""}`}</label>
+          <label>{fieldLabel(key, field, required.has(key))}</label>
           {renderField(key, field)}
           {field.description && <p>{field.description}</p>}
         </div>
       ))}
 
       <div className="schema-actions">
-        <button className="btn-primary" type="submit" disabled={disabled}>
+        <button className="btn-primary" type="submit" disabled={disabled || actionsDisabled}>
           {submitLabel}
         </button>
         {secondaryLabel && onSecondarySubmit && (
           <button
             className="btn-secondary"
             type="button"
-            disabled={disabled}
+            disabled={disabled || actionsDisabled}
             onClick={() => onSecondarySubmit(normalized())}
           >
             {secondaryLabel}

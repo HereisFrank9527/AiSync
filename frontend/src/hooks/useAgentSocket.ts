@@ -1,5 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentEvent } from "../types";
+import { apiBaseToWsBase } from "../config/runtime";
+
+const LIVE_EVENT_LIMIT = 5000;
+
+function appendLiveEvent(current: AgentEvent[], event: AgentEvent) {
+  if (event.type === "agent_final") {
+    const last = current[current.length - 1];
+    if (
+      last?.type === "agent_final" &&
+      last.conversation_id === event.conversation_id &&
+      last.content === event.content
+    ) {
+      return current;
+    }
+  }
+  const next = [...current, event];
+  return next.length > LIVE_EVENT_LIMIT ? next.slice(-LIVE_EVENT_LIMIT) : next;
+}
 
 export function useAgentSocket(
   projectPath: string | null,
@@ -8,6 +26,7 @@ export function useAgentSocket(
 ) {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [connected, setConnected] = useState(false);
+  const [historyVersion, setHistoryVersion] = useState(0);
   const presetRef = useRef<string | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
 
@@ -23,7 +42,7 @@ export function useAgentSocket(
 
     const connect = () => {
       const encodedPath = encodeURIComponent(projectPath);
-      const socket = new WebSocket(`ws://localhost:8000/api/agent/current/ws?project_path=${encodedPath}`);
+      const socket = new WebSocket(`${apiBaseToWsBase()}/api/agent/current/ws?project_path=${encodedPath}`);
       socketRef.current = socket;
 
       socket.onopen = () => {
@@ -46,12 +65,9 @@ export function useAgentSocket(
             return;
           }
           if (!event.sender) event.sender = "agent";
-          setEvents((current) => [...current, event].slice(-200));
+          setEvents((current) => appendLiveEvent(current, event));
         } catch {
-          setEvents((current) => [
-            ...current,
-            { type: "error", content: "收到无法解析的后端消息" },
-          ].slice(-200));
+          setEvents((current) => appendLiveEvent(current, { type: "error", content: "收到无法解析的后端消息" }));
         }
       };
     };
@@ -72,19 +88,24 @@ export function useAgentSocket(
   }, []);
 
   const setHistory = useCallback((history: AgentEvent[]) => {
-    setEvents(history.slice(-200));
+    setEvents(history);
+    setHistoryVersion((current) => current + 1);
   }, []);
 
-  const clearEvents = useCallback(() => setEvents([]), []);
+  const clearEvents = useCallback(() => {
+    setEvents([]);
+    setHistoryVersion((current) => current + 1);
+  }, []);
 
   const send = useCallback(
-    (content: string) => {
+    (content: string, enabledTools?: string[] | null) => {
       const payload: Record<string, unknown> = { type: "user_message", content };
       if (presetRef.current) payload.preset_id = presetRef.current;
       if (conversationId) payload.conversation_id = conversationId;
+      if (enabledTools !== undefined) payload.enabled_tools = enabledTools;
       socketRef.current?.send(JSON.stringify(payload));
       setEvents((current) =>
-        [...current, { type: "user_message", content, sender: "user" as const }].slice(-200),
+        appendLiveEvent(current, { type: "user_message", content, sender: "user" as const }),
       );
     },
     [conversationId],
@@ -94,5 +115,5 @@ export function useAgentSocket(
     socketRef.current?.send(JSON.stringify({ type: "interrupt" }));
   }, []);
 
-  return { connected, events, send, interrupt, setPresetId, setHistory, clearEvents };
+  return { connected, events, historyVersion, send, interrupt, setPresetId, setHistory, clearEvents };
 }

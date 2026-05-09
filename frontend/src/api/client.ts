@@ -1,4 +1,6 @@
-const BASE = "http://localhost:8000/api";
+import { getApiBase } from "../config/runtime";
+
+const BASE = getApiBase();
 
 /** 通用 fetch 封装 */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

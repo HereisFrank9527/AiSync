@@ -2,11 +2,16 @@
   height: 100vh;
   overflow-y: auto;
   padding: var(--space-lg);
+  background: var(--color-bg-secondary);
 }
 
 .tools-header {
   max-width: var(--content-max-width);
   margin: 0 auto var(--space-lg);
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  align-items: flex-start;
 }
 
 .tools-header h2 {
@@ -20,15 +25,112 @@
   color: var(--color-text-secondary);
 }
 
+.tools-header-stats {
+  display: flex;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.tools-header-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  align-items: flex-end;
+}
+
+.tools-header-stats span {
+  min-width: 88px;
+  padding: var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.tools-header-stats strong {
+  display: block;
+  color: var(--color-text);
+  font-size: var(--font-size-lg);
+}
+
 .tools-error {
   max-width: var(--content-max-width);
   margin: 0 auto var(--space-md);
   color: var(--color-danger);
 }
 
-.tools-grid {
+.tools-layout {
   max-width: var(--content-max-width);
   margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: var(--space-lg);
+  align-items: start;
+}
+
+.tools-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.tools-filter {
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.tools-capability-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-sm);
+}
+
+.tools-capability-strip div {
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.tools-capability-strip span {
+  display: block;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.tools-capability-strip strong {
+  display: block;
+  margin-top: var(--space-xs);
+  font-size: var(--font-size-xl);
+}
+
+.tool-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.tool-section > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tool-section h3 {
+  margin: 0;
+  font-size: var(--font-size-base);
+}
+
+.tool-section > header span {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.tools-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: var(--space-md);
@@ -38,21 +140,40 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
-  min-height: 120px;
+  min-height: 150px;
   padding: var(--space-md);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: var(--color-bg);
   text-align: left;
   box-shadow: var(--shadow-sm);
 }
 
-.tool-card:hover {
+.tool-card:hover,
+.tool-run-item:hover {
   background: var(--color-bg-secondary);
   border-color: var(--color-border-strong);
 }
 
-.tool-card span {
+.tool-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  align-items: flex-start;
+}
+
+.tool-card-top em {
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-light);
+  color: var(--color-accent-hover);
+  font-size: var(--font-size-xs);
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.tool-card span,
+.tool-run-item span {
   font-weight: 600;
   color: var(--color-text);
 }
@@ -62,4 +183,152 @@
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
   line-height: var(--line-height);
+}
+
+.tool-card small,
+.tool-run-item small {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.tool-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-top: auto;
+}
+
+.tool-card-meta em,
+.tool-run-item em {
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-style: normal;
+}
+
+.tool-runs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  position: sticky;
+  top: var(--space-lg);
+}
+
+.tool-runs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tool-runs h3 {
+  margin: 0;
+  font-size: var(--font-size-base);
+}
+
+.tool-runs-header span {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.tool-run-filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-xs);
+}
+
+.tool-run-filters select {
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 6px 8px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+}
+
+.tool-run-item {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  overflow: hidden;
+}
+
+.tool-run-open {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  border: none;
+  background: transparent;
+  text-align: left;
+}
+
+.tool-run-open small {
+  grid-column: 1 / -1;
+}
+
+.tool-run-open strong {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+}
+
+.tool-run-reuse {
+  padding: 6px var(--space-sm);
+  border: none;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  text-align: left;
+}
+
+.tool-run-reuse:hover {
+  color: var(--color-text);
+}
+
+.tool-run-item .is-success {
+  color: var(--color-success);
+}
+
+.tool-run-item .is-error {
+  color: var(--color-danger);
+}
+
+@media (max-width: 960px) {
+  .tools-header {
+    flex-direction: column;
+  }
+
+  .tools-header-side {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .tools-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .tool-runs {
+    position: static;
+  }
+}
+
+@media (max-width: 640px) {
+  .tools-panel {
+    padding: var(--space-md);
+  }
+
+  .tools-capability-strip {
+    grid-template-columns: 1fr;
+  }
 }

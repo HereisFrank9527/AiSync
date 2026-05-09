@@ -26,6 +26,18 @@ class ToolRegistry:
     def get_all_schemas(self) -> list[dict]:
         return [self._tools[name].claude_schema() for name in sorted(self._tools)]
 
+    def get_schemas(self, enabled_tools: list[str] | set[str] | None = None) -> list[dict]:
+        if enabled_tools is None:
+            return self.get_all_schemas()
+        enabled = set(enabled_tools)
+        return [self._tools[name].claude_schema() for name in sorted(self._tools) if name in enabled]
+
+    def has_tool(self, name: str) -> bool:
+        return name in self._tools
+
+    def get_all_descriptors(self) -> list[dict]:
+        return [self._tools[name].frontend_descriptor() for name in sorted(self._tools)]
+
     def all(self) -> list[BaseTool]:
         return [self._tools[name] for name in sorted(self._tools)]
 

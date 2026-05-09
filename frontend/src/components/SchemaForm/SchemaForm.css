@@ -2,6 +2,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
+  padding-top: var(--space-xs);
 }
 
 .schema-field {
@@ -27,6 +28,12 @@
   min-height: 140px;
 }
 
+.schema-field input,
+.schema-field textarea,
+.schema-field select {
+  background: var(--color-bg);
+}
+
 .schema-checkbox {
   display: flex;
   align-items: center;
@@ -42,4 +49,5 @@
   display: flex;
   gap: var(--space-sm);
   padding-top: var(--space-sm);
+  flex-wrap: wrap;
 }

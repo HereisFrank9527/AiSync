@@ -45,6 +45,7 @@ frontend/src-tauri/target/
 frontend/src-tauri/gen/
 frontend/src-tauri/.tauri/
 frontend/src-tauri/Cargo.lock.tmp
+frontend/src-tauri/resources/backend/aisync-backend.exe
 
 # ===== IDE / Editor =====
 .vscode/
@@ -75,3 +76,6 @@ chroma/
 
 # ===== Claude Code =====
 .claude/
+
+.claudeignore
+.codexignore

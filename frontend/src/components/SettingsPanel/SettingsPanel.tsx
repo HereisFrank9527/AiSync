@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Preset, LLMParams, AgentBehavior } from "../../types";
+import type { Preset, LLMParams, AgentBehavior, ToolDescriptor } from "../../types";
 import "./SettingsPanel.css";
 
 const PROVIDERS = ["anthropic", "openai", "custom"] as const;
@@ -11,12 +11,15 @@ interface SettingsPanelProps {
   activePreset: Preset | null;
   onSelect: (id: string) => void;
   onCreate: (data: { name: string }) => Promise<Preset>;
+  onCopy: (id: string, data?: { name?: string | null }) => Promise<Preset>;
   onUpdate: (
     id: string,
     data: { name?: string; llm?: LLMParams; behavior?: AgentBehavior },
   ) => Promise<Preset>;
+  onListModels: (llm: LLMParams) => Promise<{ models: string[] }>;
   onDelete: (id: string) => Promise<void>;
   isBuiltin: (id: string) => boolean;
+  tools: ToolDescriptor[];
 }
 
 export default function SettingsPanel({
@@ -25,9 +28,12 @@ export default function SettingsPanel({
   activePreset,
   onSelect,
   onCreate,
+  onCopy,
   onUpdate,
+  onListModels,
   onDelete,
   isBuiltin,
+  tools,
 }: SettingsPanelProps) {
   const [llm, setLlm] = useState<LLMParams | null>(null);
   const [behavior, setBehavior] = useState<AgentBehavior | null>(null);
@@ -36,14 +42,50 @@ export default function SettingsPanel({
   const [isError, setIsError] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");
+  const [showRename, setShowRename] = useState(false);
+  const [renameName, setRenameName] = useState("");
+  const [modelOptions, setModelOptions] = useState<string[]>([]);
+  const [modelLoading, setModelLoading] = useState(false);
+  const [modelError, setModelError] = useState("");
 
   useEffect(() => {
     if (!activePreset) return;
     setLlm({ ...activePreset.llm });
-    setBehavior({ ...activePreset.behavior });
+    setBehavior({
+      ...activePreset.behavior,
+      enabled_tools: activePreset.behavior.enabled_tools ?? null,
+    });
+    setRenameName(activePreset.name);
     setMessage("");
     setIsError(false);
+    setShowRename(false);
   }, [activePreset]);
+
+  useEffect(() => {
+    if (!llm) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setModelLoading(true);
+      setModelError("");
+      void onListModels(llm)
+        .then((result) => {
+          if (cancelled) return;
+          setModelOptions(result.models);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setModelOptions([]);
+          setModelError("无法获取模型列表");
+        })
+        .finally(() => {
+          if (!cancelled) setModelLoading(false);
+        });
+    }, 500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [llm?.provider, llm?.api_key, llm?.api_key_env, llm?.api_base, onListModels]);
 
   if (!activePreset || !llm || !behavior) {
     return <p className="settings-loading">加载配置中…</p>;
@@ -53,6 +95,27 @@ export default function SettingsPanel({
 
   const patchLlm = (k: keyof LLMParams, v: unknown) =>
     setLlm((p) => (p ? { ...p, [k]: v } : p));
+
+  const enabledTools = behavior.enabled_tools;
+  const allToolsEnabled = enabledTools == null;
+
+  const setAllToolsEnabled = (enabled: boolean) => {
+    setBehavior((current) => current ? {
+      ...current,
+      enabled_tools: enabled ? null : tools.map((tool) => tool.name),
+    } : current);
+  };
+
+  const toggleTool = (name: string, checked: boolean) => {
+    setBehavior((current) => {
+      if (!current) return current;
+      const currentTools = current.enabled_tools ?? tools.map((tool) => tool.name);
+      const next = checked
+        ? Array.from(new Set([...currentTools, name]))
+        : currentTools.filter((toolName) => toolName !== name);
+      return { ...current, enabled_tools: next };
+    });
+  };
 
   const handleSave = async () => {
     if (readonly) return;
@@ -81,6 +144,38 @@ export default function SettingsPanel({
     } catch {
       setIsError(true);
       setMessage("创建失败");
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!activePreset) return;
+    try {
+      await onCopy(activePreset.id, { name: `${activePreset.name} 副本` });
+      setIsError(false);
+      setMessage("已复制");
+      setTimeout(() => setMessage(""), 3000);
+    } catch {
+      setIsError(true);
+      setMessage("复制失败");
+    }
+  };
+
+  const handleRename = async () => {
+    if (readonly) return;
+    const name = renameName.trim();
+    if (!name || name === activePreset.name) {
+      setShowRename(false);
+      return;
+    }
+    try {
+      await onUpdate(activePreset.id, { name });
+      setIsError(false);
+      setMessage("已重命名");
+      setTimeout(() => setMessage(""), 3000);
+      setShowRename(false);
+    } catch {
+      setIsError(true);
+      setMessage("重命名失败");
     }
   };
 
@@ -127,6 +222,14 @@ export default function SettingsPanel({
             <button className="btn-secondary" onClick={() => setShowNew(true)}>
               新建
             </button>
+            <button className="btn-secondary" onClick={handleCopy}>
+              复制
+            </button>
+            {!readonly && (
+              <button className="btn-secondary" onClick={() => setShowRename(true)}>
+                重命名
+              </button>
+            )}
             {!readonly && (
               <button className="btn-danger" onClick={handleDelete}>
                 删除
@@ -148,6 +251,29 @@ export default function SettingsPanel({
               <button
                 className="btn-ghost"
                 onClick={() => { setShowNew(false); setNewName(""); }}
+              >
+                取消
+              </button>
+            </div>
+          )}
+
+          {showRename && !readonly && (
+            <div className="preset-new-row">
+              <input
+                value={renameName}
+                onChange={(e) => setRenameName(e.target.value)}
+                placeholder="新预设名称"
+                onKeyDown={(e) => e.key === "Enter" && handleRename()}
+              />
+              <button className="btn-primary" onClick={handleRename}>
+                保存
+              </button>
+              <button
+                className="btn-ghost"
+                onClick={() => {
+                  setShowRename(false);
+                  setRenameName(activePreset.name);
+                }}
               >
                 取消
               </button>
@@ -212,7 +338,27 @@ export default function SettingsPanel({
               value={llm.model_name}
               onChange={(e) => patchLlm("model_name", e.target.value)}
               disabled={readonly}
+              list="llm-model-options"
             />
+            <datalist id="llm-model-options">
+              {modelOptions.map((model) => <option key={model} value={model} />)}
+            </datalist>
+            <div className="settings-field-hint">
+              <span>{modelLoading ? "自动获取模型列表中…" : modelOptions.length ? `已获取 ${modelOptions.length} 个模型` : "输入框会自动补全可用模型"}</span>
+              <button
+                className="btn-ghost"
+                type="button"
+                onClick={() => llm && void onListModels(llm)
+                  .then((result) => {
+                    setModelOptions(result.models);
+                    setModelError("");
+                  })
+                  .catch(() => setModelError("无法获取模型列表"))}
+              >
+                刷新模型
+              </button>
+            </div>
+            {modelError && <p className="settings-msg error">{modelError}</p>}
           </div>
 
           <div className="settings-field">
@@ -276,6 +422,37 @@ export default function SettingsPanel({
               disabled={readonly}
               placeholder="自定义 system prompt…"
             />
+          </div>
+          <div className="settings-field">
+            <label>主 Agent 可调用工具</label>
+            <label className="settings-checkbox">
+              <input
+                type="checkbox"
+                checked={allToolsEnabled}
+                onChange={(event) => setAllToolsEnabled(event.target.checked)}
+                disabled={readonly}
+              />
+              默认全部工具可调用
+            </label>
+            {!allToolsEnabled && (
+              <div className="settings-tools-grid">
+                {tools.map((tool) => (
+                  <label className="settings-tool-toggle" key={tool.name}>
+                    <input
+                      type="checkbox"
+                      checked={(enabledTools ?? []).includes(tool.name)}
+                      onChange={(event) => toggleTool(tool.name, event.target.checked)}
+                      disabled={readonly}
+                    />
+                    <span>
+                      <strong>{tool.name}</strong>
+                      <em>{tool.description}</em>
+                    </span>
+                  </label>
+                ))}
+                {tools.length === 0 && <p className="settings-hint">工具列表尚未加载。</p>}
+              </div>
+            )}
           </div>
         </div>
 

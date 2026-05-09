@@ -3,12 +3,19 @@ from __future__ import annotations
 from typing import Any
 
 from app.projects.context import ProjectContext
-from app.tools.base import BaseTool, ToolResult
+from app.tools.base import BaseTool, ToolFileAccess, ToolPresentation, ToolResult, ToolWorkspaceView
 
 
 class UpdateWorldviewTool(BaseTool):
     name = "update_worldview"
-    description = "Create or update a worldbuilding markdown file under the world directory."
+    description = "在 world 目录下创建或更新世界观 Markdown 文件。"
+    workspace_view = ToolWorkspaceView(view_id="worldview", label="世界观整理")
+
+    def file_access(self) -> ToolFileAccess:
+        return ToolFileAccess(read=["world/**/*.md"], write=["world/**/*.md"], generate=["world/**/*.md"])
+
+    def presentation(self) -> ToolPresentation:
+        return ToolPresentation(type="document:worldview", description="世界观文档预览")
 
     def schema(self) -> dict[str, Any]:
         return {
@@ -16,13 +23,13 @@ class UpdateWorldviewTool(BaseTool):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Worldbuilding file path under world/, such as world/overview.md.",
+                    "description": "world/ 下的世界观文件路径，例如 world/overview.md。",
                     "default": "world/overview.md",
                 },
-                "content": {"type": "string", "description": "Worldbuilding markdown content."},
+                "content": {"type": "string", "description": "世界观 Markdown 内容。"},
                 "mode": {
                     "type": "string",
-                    "description": "How to apply content to the worldview file.",
+                    "description": "如何应用到世界观文件。",
                     "enum": ["replace", "append", "prepend"],
                     "default": "append",
                 },
@@ -53,7 +60,7 @@ class UpdateWorldviewTool(BaseTool):
 
         await context.write_text(path, updated)
         return ToolResult(
-            content=f"Worldview updated: {path}",
+            content=f"世界观已更新：{path}",
             ui_hint={"type": "document:worldview", "data": {"path": path, "content": updated}},
             metadata={"path": path, "mode": mode},
         )

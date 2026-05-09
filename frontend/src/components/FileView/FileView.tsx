@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
-import MarkdownEditor from "../MarkdownEditor";
+import { lazy, Suspense, useEffect, useState } from "react";
 import "./FileView.css";
+
+const MarkdownEditor = lazy(() => import("../MarkdownEditor"));
 
 interface FileViewProps {
   path: string | null;
@@ -33,13 +34,15 @@ export default function FileView({ path, content, onChange, onSave, saving = fal
         </button>
       </header>
       <div className="file-view-editor">
-        <MarkdownEditor
-          value={draft}
-          onChange={(value) => {
-            setDraft(value);
-            onChange(value);
-          }}
-        />
+        <Suspense fallback={<div className="file-view-loading">加载编辑器…</div>}>
+          <MarkdownEditor
+            value={draft}
+            onChange={(value) => {
+              setDraft(value);
+              onChange(value);
+            }}
+          />
+        </Suspense>
       </div>
     </section>
   );

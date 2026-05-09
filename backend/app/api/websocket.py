@@ -19,9 +19,16 @@ class ConnectionManager:
         if not self._connections[project_id]:
             del self._connections[project_id]
 
-    async def broadcast(self, project_id: str, message: dict[str, Any]) -> None:
+    async def broadcast(
+        self,
+        project_id: str,
+        message: dict[str, Any],
+        exclude: WebSocket | None = None,
+    ) -> None:
         stale: list[WebSocket] = []
         for websocket in self._connections.get(project_id, set()):
+            if websocket is exclude:
+                continue
             try:
                 await websocket.send_json(message)
             except RuntimeError:

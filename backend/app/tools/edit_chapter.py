@@ -3,22 +3,28 @@ from __future__ import annotations
 from typing import Any
 
 from app.projects.context import ProjectContext
-from app.tools.base import BaseTool, ToolResult
+from app.tools.base import BaseTool, ToolFileAccess, ToolPresentation, ToolResult
 
 
 class EditChapterTool(BaseTool):
     name = "edit_chapter"
-    description = "Edit an existing chapter markdown file."
+    description = "编辑已有章节 Markdown 文件。"
+
+    def file_access(self) -> ToolFileAccess:
+        return ToolFileAccess(read=["chapters/**/*.md"], write=["chapters/**/*.md"])
+
+    def presentation(self) -> ToolPresentation:
+        return ToolPresentation(type="stream:editor", description="章节编辑器预览")
 
     def schema(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Chapter path relative to the project root."},
-                "content": {"type": "string", "description": "Markdown content to write, append, or prepend."},
+                "path": {"type": "string", "description": "相对于项目根目录的章节路径。"},
+                "content": {"type": "string", "description": "要写入、追加或前置的 Markdown 内容。"},
                 "mode": {
                     "type": "string",
-                    "description": "How to apply content to the chapter.",
+                    "description": "如何应用到章节。",
                     "enum": ["replace", "append", "prepend"],
                     "default": "replace",
                 },
@@ -49,7 +55,7 @@ class EditChapterTool(BaseTool):
 
         await context.write_text(path, updated)
         return ToolResult(
-            content=f"Chapter edited: {path}",
+            content=f"章节已更新：{path}",
             ui_hint={"type": "stream:editor", "data": {"path": path, "content": updated}},
             metadata={"path": path, "mode": mode},
         )
