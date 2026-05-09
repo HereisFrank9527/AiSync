@@ -19,6 +19,7 @@ from app.vector.store import ProjectVectorStore
 router = APIRouter(prefix="/agent", tags=["agent"])
 manager = ConnectionManager()
 active_agents: dict[str, MasterAgent] = {}
+INTERRUPTED_REPLY = "操作已中断，等待新指令。"
 
 
 class AgentRunRequest(BaseModel):
@@ -96,13 +97,14 @@ async def update_memory_background(
 
 @router.post("/{project_id}/run")
 async def run_agent(project_id: str, request: AgentRunRequest) -> dict[str, str]:
+    store = conversation_store(project_id, request.project_path)
+    conversation = store.get_or_create(request.conversation_id)
     try:
-        store = conversation_store(project_id, request.project_path)
-        conversation = store.get_or_create(request.conversation_id)
         agent = await get_agent(project_id, request.preset_id, request.project_path)
         memory = conversation_memory(project_id, request.project_path)
         memory_context = await memory.context_for(conversation)
-        store.append(conversation.id, "user", request.input, "user_message")
+        conversation = store.append(conversation.id, "user", request.input, "user_message")
+        store.set_status(conversation.id, "running")
         result = await agent.run(
             request.input,
             history=memory_context.recent_messages,
@@ -111,6 +113,10 @@ async def run_agent(project_id: str, request: AgentRunRequest) -> dict[str, str]
             override_enabled_tools="enabled_tools" in request.model_fields_set,
         )
         conversation = store.append(conversation.id, "agent", result, "agent_final")
+        store.set_status(
+            conversation.id,
+            "interrupted" if result == INTERRUPTED_REPLY else "completed",
+        )
         asyncio.create_task(
             update_memory_background(
                 conversation.id,
@@ -120,6 +126,7 @@ async def run_agent(project_id: str, request: AgentRunRequest) -> dict[str, str]
             )
         )
     except Exception as exc:
+        store.set_status(conversation.id, "failed", str(exc))
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     await manager.broadcast(
         str(settings.project_path(project_id=project_id, project_path=request.project_path)),
@@ -161,7 +168,8 @@ async def agent_websocket(project_id: str, websocket: WebSocket, project_path: s
                     agent = await get_agent(project_id, preset_id, project_path)
                     memory = ConversationMemory(root)
                     memory_context = await memory.context_for(conversation)
-                    store.append(conversation.id, "user", content, "user_message")
+                    conversation = store.append(conversation.id, "user", content, "user_message")
+                    store.set_status(conversation.id, "running")
                     await websocket.send_json({"type": "conversation", "conversation_id": conversation.id})
                     await websocket.send_json({
                         "type": "memory_status",
@@ -177,16 +185,25 @@ async def agent_websocket(project_id: str, websocket: WebSocket, project_path: s
                     async def on_text_delta(delta: str) -> None:
                         await websocket.send_json({"type": "stream", "content": delta})
 
-                    result = await agent.run(
-                        content,
-                        on_text_delta=on_text_delta,
-                        history=memory_context.recent_messages,
-                        memory_summary=memory_context.summary,
-                        enabled_tools=[str(item) for item in enabled_tools] if isinstance(enabled_tools, list) else None,
-                        override_enabled_tools=override_enabled_tools,
-                    )
+                    try:
+                        result = await agent.run(
+                            content,
+                            on_text_delta=on_text_delta,
+                            history=memory_context.recent_messages,
+                            memory_summary=memory_context.summary,
+                            enabled_tools=[str(item) for item in enabled_tools] if isinstance(enabled_tools, list) else None,
+                            override_enabled_tools=override_enabled_tools,
+                        )
+                    except Exception as exc:
+                        store.set_status(conversation.id, "failed", str(exc))
+                        await websocket.send_json({"type": "error", "content": str(exc)})
+                        continue
                     await websocket.send_json({"type": "stream_end"})
                     conversation = store.append(conversation.id, "agent", result, "agent_final")
+                    store.set_status(
+                        conversation.id,
+                        "interrupted" if result == INTERRUPTED_REPLY else "completed",
+                    )
                     asyncio.create_task(
                         update_memory_background(
                             conversation.id,

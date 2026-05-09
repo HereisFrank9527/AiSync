@@ -1,212 +1,438 @@
-# AiSync — AI 辅助长篇小说创作平台
+# AiSync
 
-Tauri 2 桌面应用 + FastAPI 后端 + React 前端。后端 Agent 通过 LLM tool calling 循环自动读写项目文件，前端通过 WebSocket 实时展示 Agent 事件。
+AiSync 是一个面向长篇小说创作的本地桌面工具。当前形态是：
+
+- Tauri 2 桌面壳
+- React + Vite 前端
+- Python FastAPI 后端
+- Agent 通过 LLM tool calling 读写项目文件
+- 项目内容保存在用户选择的本地文件夹中
+
+核心目标是让小说项目保持“文件可控、工具可见、Agent 可协作”。前端提供对话、文件树、基础信息、章节/角色/世界观、大纲、向量索引、工具中心和 LLM 预设配置。
 
 ## 项目结构
 
-```
+```text
 AiSync/
-├── backend/                  # Python FastAPI 后端
+├── backend/                  # FastAPI 后端
 │   ├── app/
-│   │   ├── agent.py          # MasterAgent — agentic loop 核心
+│   │   ├── agent.py          # MasterAgent 主循环
+│   │   ├── cli.py            # 后端命令行入口
 │   │   ├── main.py           # FastAPI 应用入口
-│   │   ├── api/
-│   │   │   ├── agent.py      # /api/agent — WebSocket + REST 路由
-│   │   │   ├── config.py     # /api/config/llm — LLM 配置 GET/PUT
-│   │   │   ├── projects.py   # /api/projects — 项目文件 CRUD
-│   │   │   └── websocket.py  # ConnectionManager
-│   │   ├── core/
-│   │   │   └── config.py     # Settings (pydantic-settings)
-│   │   ├── llm/
-│   │   │   ├── types.py      # ChatRequest / ChatResponse / LLMClient Protocol
-│   │   │   ├── factory.py    # create_llm_client() 工厂
-│   │   │   ├── anthropic_client.py  # Anthropic Claude 后端
-│   │   │   └── openai_client.py     # OpenAI 兼容后端 (OpenAI/DeepSeek/本地)
-│   │   ├── tools/
-│   │   │   ├── base.py       # BaseTool / ToolResult / ToolCall
-│   │   │   ├── registry.py   # ToolRegistry (自动发现)
-│   │   │   ├── factory.py    # create_tool_registry()
-│   │   │   ├── write_chapter.py   # 写章节工具
-│   │   │   └── search_project.py  # 搜索项目文件工具
-│   │   ├── projects/
-│   │   │   └── context.py    # ProjectContext — 安全的项目文件读写
-│   │   └── vector/
-│   │       └── store.py      # ProjectVectorStore (当前为空壳)
+│   │   ├── api/              # REST / WebSocket API
+│   │   ├── conversations/    # 对话历史与记忆压缩
+│   │   ├── core/             # 配置与 LLM 预设
+│   │   ├── llm/              # Anthropic / OpenAI 兼容客户端
+│   │   ├── projects/         # 项目文件安全读写与大纲解析
+│   │   ├── tools/            # Agent 工具
+│   │   └── vector/           # 项目索引与检索
+│   ├── tests/
 │   └── pyproject.toml
-├── frontend/                 # React + Vite + Tauri 2
+├── frontend/                 # React + Vite + Tauri
 │   ├── src/
-│   │   ├── App.tsx           # 主界面（含 LLM 设置面板入口）
-│   │   ├── main.tsx          # React 入口
+│   │   ├── App.tsx
 │   │   ├── components/
-│   │   │   └── SettingsPanel.tsx  # LLM 运行时配置面板
 │   │   ├── hooks/
-│   │   │   └── useAgentSocket.ts  # WebSocket hook
-│   │   └── style.css
-│   ├── src-tauri/            # Tauri 2 Rust 壳
-│   │   ├── src/main.rs
-│   │   ├── tauri.conf.json
-│   │   └── Cargo.toml
-│   ├── index.html
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── vite.config.ts
-└── projects/                 # 小说项目数据目录 (运行时生成)
+│   │   ├── config/
+│   │   └── workspaceViews.tsx
+│   ├── src-tauri/
+│   │   ├── src/main.rs       # Tauri 壳、sidecar 启动、诊断日志
+│   │   └── tauri.conf.json
+│   └── package.json
+├── scripts/
+│   ├── tauri_dev.ps1         # 开发态：启动 Python 后端 + Vite
+│   ├── tauri_build.ps1       # 发布态：构建前端并准备后端 sidecar
+│   ├── build_backend.ps1     # PyInstaller 构建后端 exe
+│   └── prepare_tauri_backend.ps1
+├── 工具描述.md
+└── 规划.md
 ```
 
 ## 环境要求
 
-- Python >= 3.11 (推荐 conda)
-- Node.js >= 18
-- Rust (Tauri 2 编译需要)
+- Windows 当前支持最好
+- Python 3.11
+- Node.js 18+
+- Rust toolchain
+- Tauri 2 依赖
 
-## 快速开始
+可选：
 
-### 1. 后端
+- `chromadb`：启用 Chroma 向量库后端
+- PyInstaller：发布打包后端 sidecar 时需要
 
-```bash
-cd backend
+## 安装依赖
 
-# 创建 .env 文件
-cat > .env << 'EOF'
-# --- 选择 LLM 提供商 ---
-# 方案 A: Anthropic Claude (默认)
-LLM_PROVIDER=anthropic
-ANTHROPIC_API_KEY=sk-ant-xxxxx
-LLM_MODEL_NAME=claude-opus-4-7
+后端：
 
-# 方案 B: OpenAI
-# LLM_PROVIDER=openai
-# OPENAI_API_KEY=sk-xxxxx
-# LLM_API_KEY_ENV=OPENAI_API_KEY
-# LLM_MODEL_NAME=gpt-4o
-
-# 方案 C: OpenAI 兼容 API (DeepSeek / 本地 Ollama 等)
-# LLM_PROVIDER=custom
-# LLM_API_KEY_ENV=DEEPSEEK_API_KEY
-# DEEPSEEK_API_KEY=sk-xxxxx
-# LLM_API_BASE=https://api.deepseek.com/v1
-# LLM_MODEL_NAME=deepseek-chat
-EOF
-
-# 安装依赖 (conda 环境)
-pip install -e ".[dev]"
-
-# 启动后端
-uvicorn app.main:app --reload --port 8000
+```powershell
+.\.conda\python.exe -m pip install -e "backend[dev,package]"
 ```
 
-后端启动后：
-- 健康检查: http://localhost:8000/health
-- API 文档: http://localhost:8000/docs
-- WebSocket: ws://localhost:8000/api/agent/{project_id}/ws
+如果要使用 Chroma：
 
-### 2. 前端 (纯 Web 开发模式)
+```powershell
+.\.conda\python.exe -m pip install -e "backend[vector]"
+```
 
-```bash
+前端：
+
+```powershell
 cd frontend
 npm install
-npm run dev
 ```
 
-浏览器打开 http://localhost:1420 即可使用。
+## 开发运行
 
-### 3. 前端 (Tauri 桌面应用模式)
+推荐直接运行桌面开发模式：
 
-```bash
+```powershell
 cd frontend
 npm run tauri dev
 ```
 
+开发态行为：
+
+- 不会打包 Python 后端
+- `scripts/tauri_dev.ps1` 会先检查 `http://127.0.0.1:8000/health`
+- 如果后端没启动，会用源码方式启动：
+
+```powershell
+.\.conda\python.exe -m app.cli --host 127.0.0.1 --port 8000 --reload
+```
+
+- 前端由 Vite 提供，端口是 `1420`
+- 开发后端日志写入 `.dev-logs/`
+
+也可以手动分开跑：
+
+```powershell
+cd backend
+..\.conda\python.exe -m app.cli --reload
+```
+
+```powershell
+cd frontend
+npm run dev
+```
+
+健康检查：
+
+- `http://127.0.0.1:8000/health`
+- `http://127.0.0.1:8000/docs`
+
 ## 打包发布
 
-当前桌面端采用 `Tauri + Python backend sidecar` 的方式打包。Windows 下推荐直接用现成脚本：
+发布态使用 `Tauri + PyInstaller 后端 sidecar`。
 
-```bash
-# 1. 构建 backend 可执行文件
-powershell -ExecutionPolicy Bypass -File scripts/build_backend.ps1
+一条命令构建完整安装包：
 
-# 2. 构建完整桌面安装包
+```powershell
 cd frontend
 npm run tauri build
 ```
 
-打包产物会生成在：
-- `backend/dist/aisync-backend.exe`
-- `frontend/src-tauri/target/release/bundle/msi/`
-- `frontend/src-tauri/target/release/bundle/nsis/`
+构建过程会自动：
 
-说明：
-- `scripts/build_backend.ps1` 会先用 PyInstaller 把 Python 后端打成单文件 exe
-- `npm run tauri build` 会自动先执行后端构建，再生成 Tauri 安装包
-- 当前 Windows 首次打包可能会下载 WiX / NSIS 组件，属于正常现象
+1. 构建 React 前端
+2. 用 PyInstaller 将后端打成 `aisync-backend.exe`
+3. 拷贝到 `frontend/src-tauri/resources/backend/`
+4. 构建 Tauri 安装包
 
-## 配置说明
+产物位置：
 
-所有配置通过 `backend/.env` 文件或环境变量设置：
+```text
+backend/dist/aisync-backend.exe
+frontend/src-tauri/target/release/bundle/msi/
+frontend/src-tauri/target/release/bundle/nsis/
+```
+
+也可以只构建后端：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build_backend.ps1
+```
+
+注意：
+
+- 开发态 `npm run tauri dev` 不会再打包后端
+- 发布态 `npm run tauri build` 才会打包后端
+- 如果构建时报 `os error 32`，通常是旧的 `aisync-backend.exe` 进程占用了文件，结束该进程后重试
+
+## 运行日志
+
+安装版日志位置：
+
+```text
+%APPDATA%\com.aisync.app\startup-diagnostics.txt
+%LOCALAPPDATA%\com.aisync.app\logs\frontend.boot.log
+%LOCALAPPDATA%\com.aisync.app\logs\backend.last_start.txt
+%LOCALAPPDATA%\com.aisync.app\logs\backend.out.log
+%LOCALAPPDATA%\com.aisync.app\logs\backend.err.log
+```
+
+开发态日志位置：
+
+```text
+.dev-logs/backend-dev.out.log
+.dev-logs/backend-dev.err.log
+```
+
+诊断文件会记录：
+
+- 当前版本
+- app data / log / resource 路径
+- 后端候选 exe 是否存在
+- `127.0.0.1:8000` 端口状态
+- Tauri 管理的后端进程状态
+- 关键日志文件是否存在
+
+## 项目数据
+
+默认项目根目录：
+
+```text
+~/.aisync/projects
+```
+
+桌面端通常由用户选择一个项目文件夹。项目初始化会创建基础结构，常见目录包括：
+
+```text
+chapters/
+characters/
+world/
+plot/
+.aisync/
+```
+
+`.aisync/` 用于保存对话历史、工具运行记录、向量索引等运行数据。
+
+## LLM 预设
+
+LLM 不再只有单一全局配置。前端设置页支持多个预设：
+
+- 创建预设
+- 复制已有预设
+- 重命名预设
+- 修改 provider / API Key / API Base / model / max tokens
+- 自动获取模型列表
+- 为主 Agent 配置可调用工具
+
+支持的 provider：
+
+- `anthropic`
+- `openai`
+- `custom`，用于 OpenAI 兼容 API
+
+主要环境变量：
 
 | 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `LLM_PROVIDER` | `anthropic` | LLM 提供商: `anthropic` / `openai` / `custom` |
-| `LLM_API_KEY_ENV` | `ANTHROPIC_API_KEY` | 存放 API Key 的环境变量名 |
-| `LLM_API_BASE` | (空) | 自定义 API 地址，用于 OpenAI 兼容服务 |
-| `LLM_MODEL_NAME` | `claude-opus-4-7` | 模型名称 |
-| `LLM_MAX_TOKENS` | `16000` | 最大输出 token 数 |
-| `LLM_ENABLE_THINKING` | `true` | 启用 Claude 思考模式 (仅 Anthropic) |
-| `LLM_EFFORT` | `high` | 思考力度: `low`/`medium`/`high`/`xhigh`/`max` |
-| `LLM_PROMPT_CACHE` | `true` | 启用 Anthropic prompt cache |
-| `PROJECTS_ROOT` | `./projects` | 小说项目数据存储路径 |
-| `CORS_ORIGINS` | `["http://localhost:1420", "http://localhost:5173"]` | CORS 允许的源 |
+| --- | --- | --- |
+| `LLM_PROVIDER` | `anthropic` | 默认 LLM 提供商 |
+| `LLM_API_KEY` | 空 | 直接写入 API Key |
+| `LLM_API_KEY_ENV` | `ANTHROPIC_API_KEY` | 从哪个环境变量读取 API Key |
+| `LLM_API_BASE` | 空 | OpenAI 兼容 API 地址 |
+| `LLM_MODEL_NAME` | `claude-opus-4-7` | 默认模型名 |
+| `LLM_MAX_TOKENS` | `16000` | 最大输出 token |
+| `LLM_ENABLE_THINKING` | `true` | Anthropic thinking |
+| `LLM_EFFORT` | `high` | thinking effort |
+| `LLM_PROMPT_CACHE` | `true` | Anthropic prompt cache |
+| `EMBEDDING_MODEL_NAME` | 空 | 向量检索使用的 embedding 模型名 |
+| `VECTOR_BACKEND` | `local` | `local` 或 `chroma` |
+| `CHROMA_PERSIST_PATH` | `.vectordb/chroma` | Chroma 存储目录 |
+| `PROJECTS_ROOT` | `~/.aisync/projects` | 默认项目根目录 |
 
-所有 LLM 配置也可以在前端侧边栏的「LLM 设置」面板中运行时修改，无需重启后端。修改 provider / API Key / API Base 时会自动重建所有活跃 Agent 的 LLM 客户端。
+## Agent 对话
 
-## Agent 工作流
+Agent 对话通过 WebSocket 工作：
 
-1. 用户通过前端发送创作指令
-2. WebSocket 将消息传递给 `MasterAgent.run()`
-3. Agent 构造 LLM 请求，附带可用工具列表
-4. LLM 返回文本或 tool_call
-5. 如果有 tool_call，Agent 执行工具并将结果推送到前端，然后将 tool_result 回传给 LLM 继续循环
-6. 循环直到 LLM 返回纯文本（最终回答）
+```text
+ws://127.0.0.1:8000/api/agent/current/ws?project_path=...
+```
 
-### 当前可用工具
+当前能力：
 
-工具现在以统一描述符暴露给 Agent 和前端工具中心：包含参数 schema、默认 Agent、可能读取/修改/生成的文件，以及前端呈现类型。每次手动执行或 AI 生成都会写入 `.aisync/tool_runs/{run_id}.json`，方便前端展示最近运行记录。
+- 历史对话自动加载
+- 默认打开上一次对话，没有历史时才新建
+- Markdown 渲染
+- 表格渲染
+- 工具调用过程展示
+- 工作状态指示
+- 中断请求
+- 对话记忆压缩
 
-| 工具 | 说明 | 文件影响 | 呈现 |
-|------|------|----------|------|
-| `write_chapter` | 写入/覆盖章节 Markdown 文件 | 修改 `chapters/**/*.md` | `stream:editor` |
-| `edit_chapter` | 替换、追加或前置编辑已有章节 | 读取/修改 `chapters/**/*.md` | `stream:editor` |
-| `create_character` | 创建角色档案 Markdown 与 YAML 元数据 | 生成 `characters/{slug}/profile.md`、`characters/{slug}/profile.yaml` | `card:character` |
-| `update_worldview` | 创建或更新世界观 Markdown 文件 | 读取/修改/生成 `world/**/*.md` | `document:worldview` |
-| `search_project` | 按关键词搜索项目中的文本文件 | 读取 `*.md/*.txt/*.yaml/*.yml/*.json` | `list:search_results` |
+中断机制：
 
-前端「工具中心」支持两种入口：
-- **直接执行**：用户填写表单后调用工具本体，立即读写项目文件。
-- **AI 生成**：根据工具默认提示词和当前预设交给 Agent 生成，再由 Agent 自行决定如何调用工具。
+- 前端会通过 WebSocket 和独立 HTTP 请求双通道发起中断
+- 后端会在 Agent 循环和流式输出回调中检查中断状态
+- 如果正在执行工具，会等当前工具返回后停止后续步骤
 
-## API 端点
+## 工具系统
 
-### REST
+工具现在通过统一描述符暴露给 Agent、工具中心和侧边栏工具页。描述符包括：
 
-- `GET /health` — 健康检查
-- `POST /api/projects` — 创建项目
-- `GET /api/projects/{id}/files` — 列出项目文件
-- `GET /api/projects/{id}/files/{path}` — 读取文件
-- `PUT /api/projects/{id}/files/{path}` — 写入文件
-- `GET /api/config/llm` — 获取当前 LLM 配置
-- `PUT /api/config/llm` — 更新 LLM 配置（支持部分更新，自动重建 Agent 客户端）
-- `GET /api/tools` — 获取工具描述符列表（schema、默认 Agent、文件影响、呈现类型）
-- `POST /api/tools/{name}/execute` — 直接执行工具并写入 `.aisync/tool_runs/` 记录
-- `POST /api/tools/{name}/invoke` — 将工具提示词交给 Agent 执行并写入运行记录
-- `GET /api/tools/runs` — 获取当前项目最近工具运行记录
-- `GET /api/tools/runs/{run_id}` — 获取单次工具运行详情
-- `POST /api/agent/{id}/run` — 同步运行 Agent
-- `POST /api/agent/{id}/interrupt` — 中断 Agent
+- 工具名
+- 中文描述
+- 输入 schema
+- UI schema
+- 文件读写影响
+- 默认 LLM 预设
+- 前端呈现方式
+- 是否提供工作区页面
 
-### WebSocket
+当前主要工具：
 
-- `ws://localhost:8000/api/agent/{id}/ws`
-  - 发送: `{"type": "user_message", "content": "..."}`
-  - 发送: `{"type": "interrupt"}`
-  - 接收: `{"type": "tool_result", "content": "...", "ui_hint": {...}}`
-  - 接收: `{"type": "agent_final", "content": "..."}`
+| 工具 | 说明 | 主要影响 |
+| --- | --- | --- |
+| `write_chapter` | 写入章节草稿 | 写入 `chapters/**/*.md` |
+| `edit_chapter` | 编辑已有章节 | 读写 `chapters/**/*.md` |
+| `create_character` | 创建角色档案 | 写入 `characters/**` |
+| `update_worldview` | 创建或更新世界观文档 | 读写 `world/**/*.md` |
+| `outline_generate` | 生成/整理大纲 | 读写 `plot/outline.*` |
+| `consistency_check` | 一致性检查 | 读取项目上下文，不直接写文件 |
+| `search_project` | 搜索项目文件 | 读取文本文件 |
+
+工具运行记录保存在：
+
+```text
+.aisync/tool_runs/
+```
+
+## 前端工作区
+
+侧边栏主要入口：
+
+- 基础信息：小说名、状态、目标章节、目标字数、完成统计
+- 对话：主 Agent 对话
+- 文件：文件树和 Markdown 编辑器
+- 索引：向量索引状态、重建、搜索
+- 工具中心：工具浏览、手动执行、AI 生成
+- 设置：LLM 预设和 Agent 工具权限
+
+工具也可以声明自己的工作区页面，例如：
+
+- 大纲
+- 章节
+- 角色
+- 世界观
+
+这些页面是否出现在侧边栏，由工具描述符决定，不应依赖硬编码入口。
+
+## 向量索引
+
+向量接口：
+
+- `GET /api/vector/status?project_path=...`
+- `POST /api/vector/rebuild?project_path=...`
+- `POST /api/vector/search`
+
+当前支持：
+
+- 本地索引后端
+- 可选 Chroma 后端
+- 按项目文件重建索引
+- 在章节工具和索引页面中搜索相关片段
+
+一致性检查等工具会使用项目索引，但数值和标题编号仍需要继续降噪优化。
+
+## API 概览
+
+常用 REST：
+
+```text
+GET    /health
+GET    /api/projects/files
+GET    /api/projects/overview
+PUT    /api/projects/overview
+GET    /api/conversations
+POST   /api/conversations
+GET    /api/conversations/{conversation_id}
+DELETE /api/conversations/{conversation_id}
+GET    /api/presets
+POST   /api/presets
+POST   /api/presets/models
+POST   /api/presets/{preset_id}/copy
+PUT    /api/presets/{preset_id}
+GET    /api/tools
+POST   /api/tools/{name}/execute
+POST   /api/tools/{name}/invoke
+GET    /api/tools/runs
+POST   /api/vector/rebuild
+GET    /api/vector/status
+POST   /api/vector/search
+POST   /api/agent/current/interrupt
+```
+
+WebSocket：
+
+```text
+ws://127.0.0.1:8000/api/agent/current/ws?project_path=...
+```
+
+发送：
+
+```json
+{"type":"user_message","content":"继续写下一章","preset_id":"default","enabled_tools":null}
+```
+
+```json
+{"type":"interrupt","preset_id":"default"}
+```
+
+接收事件包括：
+
+- `conversation`
+- `memory_status`
+- `agent_status`
+- `stream`
+- `stream_end`
+- `tool_call_start`
+- `tool_call_end`
+- `tool_call_error`
+- `tool_result`
+- `agent_final`
+- `error`
+
+## 常用检查
+
+前端构建：
+
+```powershell
+cd frontend
+npm run build
+```
+
+Rust 检查：
+
+```powershell
+cd frontend/src-tauri
+cargo check
+```
+
+后端语法检查：
+
+```powershell
+.\.conda\python.exe -m compileall backend\app
+```
+
+后端测试：
+
+```powershell
+.\.conda\python.exe -m pytest backend\tests
+```
+
+完整打包：
+
+```powershell
+cd frontend
+npm run tauri build
+```
+
+## 当前注意事项
+
+- `npm run tauri dev` 是开发模式，不会打包后端
+- `npm run tauri build` 是发布模式，会打包后端 sidecar
+- 安装版侧栏的连接状态指 Agent WebSocket，不等同于后端是否启动
+- 没选择项目时 Agent 会显示未选择或未连接，这是正常状态
+- 中断不能强杀正在运行的工具内部逻辑，只会阻止后续 Agent 步骤
+- 如果安装版空白或后端异常，优先查看 `%APPDATA%` 和 `%LOCALAPPDATA%` 下的诊断日志

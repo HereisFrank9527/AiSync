@@ -1,5 +1,5 @@
 import { useMemo, useRef, useEffect, useLayoutEffect, useState, type KeyboardEvent } from "react";
-import type { AgentEvent, ToolDescriptor } from "../../types";
+import type { AgentEvent, ConversationStatus, ToolDescriptor } from "../../types";
 import { AiRender, eventToRender } from "../AiRender";
 import MarkdownView from "../MarkdownView";
 import "./ChatPanel.css";
@@ -8,6 +8,8 @@ interface ChatPanelProps {
   events: AgentEvent[];
   historyVersion: number;
   connected: boolean;
+  conversationStatus?: ConversationStatus | null;
+  conversationLastError?: string | null;
   tools: ToolDescriptor[];
   onSend: (content: string, enabledTools?: string[] | null) => void;
   onInterrupt: () => void;
@@ -143,10 +145,24 @@ function getWorkState(events: AgentEvent[], connected: boolean) {
   return { label, kind };
 }
 
+function conversationStatusToWorkState(
+  status: ConversationStatus | null | undefined,
+  lastError: string | null | undefined,
+  connected: boolean,
+) {
+  if (status === "running") return { label: "上次响应未正常结束", kind: "error" as const };
+  if (status === "failed") return { label: lastError ? `上次失败：${lastError}` : "上次响应失败", kind: "error" as const };
+  if (status === "interrupted") return { label: "上次响应已中断", kind: "done" as const };
+  if (status === "completed") return { label: "上次回复已完成", kind: "done" as const };
+  return { label: connected ? "已连接" : "未连接", kind: "idle" as const };
+}
+
 export default function ChatPanel({
   events,
   historyVersion,
   connected,
+  conversationStatus,
+  conversationLastError,
   tools,
   onSend,
   onInterrupt,
@@ -165,7 +181,12 @@ export default function ChatPanel({
   const [liveStart, setLiveStart] = useState(0);
   const displayEvents = useMemo(() => mergeStreamEvents(events), [events]);
   const liveEvents = useMemo(() => displayEvents.slice(liveStart), [displayEvents, liveStart]);
-  const workState = useMemo(() => getWorkState(liveEvents, connected), [connected, liveEvents]);
+  const workState = useMemo(
+    () => liveEvents.length > 0
+      ? getWorkState(liveEvents, connected)
+      : conversationStatusToWorkState(conversationStatus, conversationLastError, connected),
+    [connected, conversationLastError, conversationStatus, liveEvents],
+  );
   const visibleEvents = useMemo(() => displayEvents.slice(visibleStart), [displayEvents, visibleStart]);
   const allToolsEnabled = selectedTools === null;
   const enabledToolCount = allToolsEnabled ? tools.length : selectedTools.length;

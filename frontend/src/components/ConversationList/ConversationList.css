@@ -52,6 +52,41 @@
   color: var(--color-text-tertiary);
 }
 
+.conversation-status {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-tertiary);
+  font-style: normal;
+}
+
+.conversation-status.is-running {
+  color: var(--color-warning);
+  border-color: #ead8b8;
+}
+
+.conversation-status.is-failed {
+  color: var(--color-danger);
+  border-color: #f0c5c5;
+}
+
+.conversation-status.is-interrupted {
+  color: var(--color-text-secondary);
+}
+
+.conversation-status.is-completed {
+  color: var(--color-success);
+  border-color: #c9e3ce;
+}
+
+.conversation-last-error {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .conversation-delete {
   background: transparent;
   color: var(--color-danger);

@@ -36,6 +36,8 @@ export interface AgentEvent {
 
 /* ── 对话历史 ── */
 
+export type ConversationStatus = "idle" | "running" | "interrupted" | "failed" | "completed";
+
 export interface ConversationMessage {
   role: "user" | "agent";
   content: string;
@@ -48,6 +50,9 @@ export interface Conversation {
   title: string;
   created_at: string;
   updated_at: string;
+  status: ConversationStatus;
+  last_error: string | null;
+  running_since: string | null;
   messages: ConversationMessage[];
 }
 
@@ -57,6 +62,9 @@ export interface ConversationSummary {
   created_at: string;
   updated_at: string;
   message_count: number;
+  status: ConversationStatus;
+  last_error: string | null;
+  running_since: string | null;
 }
 
 /* ── 故事对象 ── */

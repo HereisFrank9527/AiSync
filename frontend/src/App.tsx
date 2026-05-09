@@ -88,6 +88,21 @@ function App() {
   const { connected, events, historyVersion, send, interrupt, setPresetId, setHistory, clearEvents } =
     useAgentSocket(project?.path ?? null, conversations.activeConversationId, handleConversationIdChange);
 
+  const lastEvent = events[events.length - 1];
+
+  useEffect(() => {
+    if (!lastEvent || !conversations.activeConversationId) return;
+    const phase = typeof lastEvent.metadata?.phase === "string" ? lastEvent.metadata.phase : "";
+    const shouldRefresh =
+      lastEvent.type === "agent_final" ||
+      lastEvent.type === "error" ||
+      phase === "interrupted" ||
+      phase === "interrupt_requested";
+    if (!shouldRefresh) return;
+    void conversations.refresh();
+    void conversations.load(conversations.activeConversationId);
+  }, [lastEvent, conversations.activeConversationId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     setPresetId(presets.activeId);
   }, [presets.activeId, setPresetId]);
@@ -211,6 +226,8 @@ function App() {
                 events={events}
                 historyVersion={historyVersion}
                 connected={connected}
+                conversationStatus={conversations.activeConversation?.status ?? null}
+                conversationLastError={conversations.activeConversation?.last_error ?? null}
                 tools={tools.tools}
                 onSend={send}
                 onInterrupt={interrupt}

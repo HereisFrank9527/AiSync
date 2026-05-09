@@ -1,4 +1,4 @@
-import type { ConversationSummary } from "../../types";
+import type { ConversationStatus, ConversationSummary } from "../../types";
 import "./ConversationList.css";
 
 interface ConversationListProps {
@@ -16,6 +16,14 @@ function formatTime(value: string) {
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleString();
 }
+
+const STATUS_LABELS: Record<ConversationStatus, string> = {
+  idle: "空闲",
+  running: "运行中",
+  interrupted: "已中断",
+  failed: "失败",
+  completed: "完成",
+};
 
 export default function ConversationList({
   items,
@@ -40,7 +48,11 @@ export default function ConversationList({
           <div key={item.id} className={`conversation-item${activeId === item.id ? " active" : ""}`}>
             <button className="conversation-main" onClick={() => onSelect(item.id)}>
               <span>{item.title}</span>
-              <small>{formatTime(item.updated_at)} · {item.message_count} 条</small>
+              <small>
+                <em className={`conversation-status is-${item.status}`}>{STATUS_LABELS[item.status] ?? item.status}</em>
+                {formatTime(item.updated_at)} · {item.message_count} 条
+              </small>
+              {item.last_error && <small className="conversation-last-error">{item.last_error}</small>}
             </button>
             <button
               className="conversation-delete"
