@@ -116,11 +116,18 @@ function getWorkState(events: AgentEvent[], connected: boolean) {
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
+    const phase = typeof event.metadata?.phase === "string" ? event.metadata.phase : "";
     if (event.type === "agent_final") {
       return { label: "回复已完成", kind: "done" as const };
     }
     if (event.type === "error" || event.type === "agent_limit_reached") {
       return { label: event.content ?? "前台错误", kind: "error" as const };
+    }
+    if (event.type === "agent_status" && (phase === "done" || phase === "interrupted" || phase === "interrupt_requested")) {
+      return { label: event.content ?? "Agent 已停止", kind: "done" as const };
+    }
+    if (event.type === "agent_status" && phase === "error") {
+      return { label: event.content ?? "Agent 出错", kind: "error" as const };
     }
     if (event.type === "stream" || event.type === "agent_status" || isToolStatusEvent(event)) {
       pending = true;
@@ -155,8 +162,10 @@ export default function ChatPanel({
   const [toolsOpen, setToolsOpen] = useState(false);
   const [selectedTools, setSelectedTools] = useState<string[] | null>(null);
   const [visibleStart, setVisibleStart] = useState(0);
+  const [liveStart, setLiveStart] = useState(0);
   const displayEvents = useMemo(() => mergeStreamEvents(events), [events]);
-  const workState = useMemo(() => getWorkState(displayEvents, connected), [connected, displayEvents]);
+  const liveEvents = useMemo(() => displayEvents.slice(liveStart), [displayEvents, liveStart]);
+  const workState = useMemo(() => getWorkState(liveEvents, connected), [connected, liveEvents]);
   const visibleEvents = useMemo(() => displayEvents.slice(visibleStart), [displayEvents, visibleStart]);
   const allToolsEnabled = selectedTools === null;
   const enabledToolCount = allToolsEnabled ? tools.length : selectedTools.length;
@@ -171,6 +180,7 @@ export default function ChatPanel({
     const start = Math.max(0, displayEvents.length - INITIAL_HISTORY_WINDOW);
     stickToBottomRef.current = true;
     pendingScrollTargetRef.current = "bottom";
+    setLiveStart(displayEvents.length);
     setVisibleStart(start);
   }, [historyVersion]);
 

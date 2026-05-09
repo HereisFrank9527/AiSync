@@ -23,6 +23,10 @@ MAX_SINGLE_MEMORY_MESSAGE_CHARS = 4000
 MAX_AGENT_ITERATIONS = 8
 
 
+class AgentInterrupted(Exception):
+    pass
+
+
 class MasterAgent:
     def __init__(
         self,
@@ -42,6 +46,7 @@ class MasterAgent:
         self.system_prompt = system_prompt or SYSTEM_PROMPT
         self.enabled_tools = set(enabled_tools) if enabled_tools is not None else None
         self._interrupted = False
+        self._running = False
 
     async def run(
         self,
@@ -53,89 +58,114 @@ class MasterAgent:
         override_enabled_tools: bool = False,
         max_iterations: int = MAX_AGENT_ITERATIONS,
     ) -> str:
-        effective_tools = set(enabled_tools) if override_enabled_tools and enabled_tools is not None else self.enabled_tools
-        if override_enabled_tools and enabled_tools is None:
-            effective_tools = None
-        await self._push_agent_status("正在检索项目上下文", "retrieving")
-        relevant_context = await self.vector_store.query(user_input)
-        messages = self._build_initial_messages(
-            user_input,
-            relevant_context,
-            history or [],
-            memory_summary or "",
-        )
-        await self._push_agent_status(
-            f"已注入 {len(relevant_context)} 条相关上下文" if relevant_context else "未检索到相关上下文，使用对话历史继续",
-            "context_ready",
-            {"context_count": len(relevant_context)},
-        )
-
-        iterations = 0
-        while True:
-            if self._interrupted:
-                self._interrupted = False
-                message = "操作已中断，等待新指令。"
-                await self._push_agent_status(message, "interrupted")
-                return message
-            if iterations >= max_iterations:
-                message = (
-                    f"已达到本轮 Agent 最大迭代次数（{max_iterations}）。"
-                    "为避免工具调用循环，已暂停继续执行。请根据当前结果继续给出下一步指令。"
-                )
-                await self._push_agent_event("agent_limit_reached", message, {"max_iterations": max_iterations})
-                await self._push_agent_status(message, "error", {"max_iterations": max_iterations})
-                return message
-            iterations += 1
-
-            await self._push_agent_status("正在请求模型", "thinking", {"iteration": iterations})
-            response = await self.llm.chat(
-                ChatRequest(
-                    messages=messages,
-                    tools=self.tools.get_schemas(effective_tools),
-                    system=self.system_prompt,
-                    stream=True,
-                ),
-                on_text_delta=on_text_delta,
+        self._interrupted = False
+        self._running = True
+        try:
+            effective_tools = set(enabled_tools) if override_enabled_tools and enabled_tools is not None else self.enabled_tools
+            if override_enabled_tools and enabled_tools is None:
+                effective_tools = None
+            await self._push_agent_status("正在检索项目上下文", "retrieving")
+            relevant_context = await self.vector_store.query(user_input)
+            messages = self._build_initial_messages(
+                user_input,
+                relevant_context,
+                history or [],
+                memory_summary or "",
             )
-
-            if not response.tool_calls:
-                await self._push_agent_status("回复已生成", "done", {"iteration": iterations})
-                return response.text
-
             await self._push_agent_status(
-                f"模型请求调用 {len(response.tool_calls)} 个工具",
-                "tool_calling",
-                {"iteration": iterations, "tool_calls": len(response.tool_calls)},
+                f"已注入 {len(relevant_context)} 条相关上下文" if relevant_context else "未检索到相关上下文，使用对话历史继续",
+                "context_ready",
+                {"context_count": len(relevant_context)},
             )
-            assistant_blocks: list[dict[str, Any]] = []
-            if response.text:
-                assistant_blocks.append({"type": "text", "text": response.text})
-            for call in response.tool_calls:
-                assistant_blocks.append(
-                    {
-                        "type": "tool_use",
-                        "id": self._tool_call_value(call, "id"),
-                        "name": self._tool_call_value(call, "name"),
-                        "input": self._tool_call_value(call, "input") or {},
-                    }
-                )
-            if assistant_blocks:
-                messages.append({"role": "assistant", "content": assistant_blocks})
-            tool_results: list[dict[str, Any]] = []
-            for call in response.tool_calls:
-                result = await self._execute_tool_call(call, effective_tools)
-                await self._push_to_frontend(result)
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": self._tool_call_value(call, "id"),
-                        "content": result.content,
-                    }
-                )
-            messages.append({"role": "user", "content": tool_results})
 
-    def interrupt(self) -> None:
+            async def guarded_text_delta(delta: str) -> None:
+                if self._interrupted:
+                    raise AgentInterrupted()
+                if on_text_delta:
+                    await on_text_delta(delta)
+
+            iterations = 0
+            while True:
+                if self._interrupted:
+                    return await self._finish_interrupted()
+                if iterations >= max_iterations:
+                    message = (
+                        f"已达到本轮 Agent 最大迭代次数（{max_iterations}）。"
+                        "为避免工具调用循环，已暂停继续执行。请根据当前结果继续给出下一步指令。"
+                    )
+                    await self._push_agent_event("agent_limit_reached", message, {"max_iterations": max_iterations})
+                    await self._push_agent_status(message, "error", {"max_iterations": max_iterations})
+                    return message
+                iterations += 1
+
+                await self._push_agent_status("正在请求模型", "thinking", {"iteration": iterations})
+                try:
+                    response = await self.llm.chat(
+                        ChatRequest(
+                            messages=messages,
+                            tools=self.tools.get_schemas(effective_tools),
+                            system=self.system_prompt,
+                            stream=True,
+                        ),
+                        on_text_delta=guarded_text_delta,
+                    )
+                except AgentInterrupted:
+                    return await self._finish_interrupted()
+
+                if self._interrupted:
+                    return await self._finish_interrupted()
+
+                if not response.tool_calls:
+                    await self._push_agent_status("回复已生成", "done", {"iteration": iterations})
+                    return response.text
+
+                await self._push_agent_status(
+                    f"模型请求调用 {len(response.tool_calls)} 个工具",
+                    "tool_calling",
+                    {"iteration": iterations, "tool_calls": len(response.tool_calls)},
+                )
+                assistant_blocks: list[dict[str, Any]] = []
+                if response.text:
+                    assistant_blocks.append({"type": "text", "text": response.text})
+                for call in response.tool_calls:
+                    assistant_blocks.append(
+                        {
+                            "type": "tool_use",
+                            "id": self._tool_call_value(call, "id"),
+                            "name": self._tool_call_value(call, "name"),
+                            "input": self._tool_call_value(call, "input") or {},
+                        }
+                    )
+                if assistant_blocks:
+                    messages.append({"role": "assistant", "content": assistant_blocks})
+                tool_results: list[dict[str, Any]] = []
+                for call in response.tool_calls:
+                    if self._interrupted:
+                        return await self._finish_interrupted()
+                    result = await self._execute_tool_call(call, effective_tools)
+                    await self._push_to_frontend(result)
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": self._tool_call_value(call, "id"),
+                            "content": result.content,
+                        }
+                    )
+                messages.append({"role": "user", "content": tool_results})
+        finally:
+            self._running = False
+
+    def interrupt(self) -> bool:
+        if not self._running:
+            return False
         self._interrupted = True
+        return True
+
+    async def _finish_interrupted(self) -> str:
+        self._interrupted = False
+        message = "操作已中断，等待新指令。"
+        await self._push_agent_status(message, "interrupted")
+        return message
 
     def _build_initial_messages(
         self,

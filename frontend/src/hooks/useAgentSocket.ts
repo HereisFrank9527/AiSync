@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentEvent } from "../types";
 import { apiBaseToWsBase } from "../config/runtime";
+import { api } from "../api/client";
 
 const LIVE_EVENT_LIMIT = 5000;
 
@@ -112,8 +113,37 @@ export function useAgentSocket(
   );
 
   const interrupt = useCallback(() => {
-    socketRef.current?.send(JSON.stringify({ type: "interrupt" }));
-  }, []);
+    const payload: Record<string, unknown> = { type: "interrupt" };
+    if (presetRef.current) payload.preset_id = presetRef.current;
+    socketRef.current?.send(JSON.stringify(payload));
+    setEvents((current) =>
+      appendLiveEvent(current, { type: "agent_status", content: "正在请求中断当前回复", sender: "agent" }),
+    );
+
+    if (!projectPath) return;
+    const params = new URLSearchParams({ project_path: projectPath });
+    if (presetRef.current) params.set("preset_id", presetRef.current);
+    void api
+      .post<{ status: string; interrupted: boolean }>(`/agent/current/interrupt?${params.toString()}`, {})
+      .then((response) => {
+        setEvents((current) =>
+          appendLiveEvent(current, {
+            type: "agent_status",
+            content: response.interrupted ? "已请求中断当前回复" : "当前没有正在运行的 Agent",
+            sender: "agent",
+            metadata: { phase: "interrupt_requested", interrupted: response.interrupted },
+          }),
+        );
+      })
+      .catch((error) => {
+        setEvents((current) =>
+          appendLiveEvent(current, {
+            type: "error",
+            content: `中断请求失败：${error instanceof Error ? error.message : String(error)}`,
+          }),
+        );
+      });
+  }, [projectPath]);
 
   return { connected, events, historyVersion, send, interrupt, setPresetId, setHistory, clearEvents };
 }

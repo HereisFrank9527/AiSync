@@ -129,10 +129,14 @@ async def run_agent(project_id: str, request: AgentRunRequest) -> dict[str, str]
 
 
 @router.post("/{project_id}/interrupt")
-async def interrupt_agent(project_id: str, project_path: str | None = None) -> dict[str, str]:
-    agent = await get_agent(project_id, project_path=project_path)
-    agent.interrupt()
-    return {"status": "interrupt_requested"}
+async def interrupt_agent(
+    project_id: str,
+    project_path: str | None = None,
+    preset_id: str | None = None,
+) -> dict[str, str | bool]:
+    agent = await get_agent(project_id, preset_id=preset_id, project_path=project_path)
+    interrupted = agent.interrupt()
+    return {"status": "interrupt_requested" if interrupted else "no_active_run", "interrupted": interrupted}
 
 
 @router.websocket("/{project_id}/ws")
@@ -199,8 +203,14 @@ async def agent_websocket(project_id: str, websocket: WebSocket, project_path: s
                         exclude=websocket,
                     )
                 elif message.get("type") == "interrupt":
-                    agent = await get_agent(project_id, project_path=project_path)
-                    agent.interrupt()
+                    preset_id = message.get("preset_id")
+                    agent = await get_agent(project_id, str(preset_id) if preset_id else None, project_path)
+                    interrupted = agent.interrupt()
+                    await websocket.send_json({
+                        "type": "agent_status",
+                        "content": "已请求中断当前回复" if interrupted else "当前没有正在运行的 Agent",
+                        "metadata": {"phase": "interrupt_requested", "interrupted": interrupted},
+                    })
             except Exception as exc:
                 await websocket.send_json({"type": "error", "content": str(exc)})
     except WebSocketDisconnect:
