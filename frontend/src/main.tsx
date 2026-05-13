@@ -4,7 +4,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import App from "./App";
 import { ensureDesktopBackendStarted } from "./config/desktopBackend";
 
-const APP_VERSION = "0.1.4";
+const APP_VERSION = __AISYNC_APP_VERSION__;
 
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (char) => {

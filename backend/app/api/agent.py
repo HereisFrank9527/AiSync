@@ -24,6 +24,7 @@ INTERRUPTED_REPLY = "操作已中断，等待新指令。"
 
 class AgentRunRequest(BaseModel):
     input: str
+    model_input: str | None = None
     preset_id: str | None = None
     project_path: str | None = None
     conversation_id: str | None = None
@@ -105,8 +106,9 @@ async def run_agent(project_id: str, request: AgentRunRequest) -> dict[str, str]
         memory_context = await memory.context_for(conversation)
         conversation = store.append(conversation.id, "user", request.input, "user_message")
         store.set_status(conversation.id, "running")
+        agent_input = request.model_input or request.input
         result = await agent.run(
-            request.input,
+            agent_input,
             history=memory_context.recent_messages,
             memory_summary=memory_context.summary,
             enabled_tools=request.enabled_tools,
@@ -156,6 +158,7 @@ async def agent_websocket(project_id: str, websocket: WebSocket, project_path: s
             try:
                 if message.get("type") == "user_message":
                     content = str(message.get("content", ""))
+                    model_content = str(message.get("model_content", "")) if message.get("model_content") else content
                     preset_id = message.get("preset_id")
                     conversation_id = message.get("conversation_id")
                     enabled_tools = message.get("enabled_tools")
@@ -187,7 +190,7 @@ async def agent_websocket(project_id: str, websocket: WebSocket, project_path: s
 
                     try:
                         result = await agent.run(
-                            content,
+                            model_content,
                             on_text_delta=on_text_delta,
                             history=memory_context.recent_messages,
                             memory_summary=memory_context.summary,

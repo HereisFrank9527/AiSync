@@ -36,14 +36,15 @@ AiSync/
 │   │   ├── config/
 │   │   └── workspaceViews.tsx
 │   ├── src-tauri/
-│   │   ├── src/main.rs       # Tauri 壳、sidecar 启动、诊断日志
+│   │   ├── src/main.rs       # Tauri 壳、内置 Python 后端启动、自动 venv 回退、诊断日志
 │   │   └── tauri.conf.json
 │   └── package.json
 ├── scripts/
 │   ├── tauri_dev.ps1         # 开发态：启动 Python 后端 + Vite
-│   ├── tauri_build.ps1       # 发布态：构建前端并准备后端 sidecar
-│   ├── build_backend.ps1     # PyInstaller 构建后端 exe
-│   └── prepare_tauri_backend.ps1
+│   ├── tauri_build.ps1       # 发布态：构建前端并准备运行时资源
+│   ├── prepare_runtime_python.ps1 # 准备内置 Python runtime
+│   ├── prepare_runtime_wheels.ps1 # 准备离线 Python 依赖 wheels（可选）
+│   └── prepare_tauri_backend.ps1 # 拷贝干净后端源码到 Tauri resources
 ├── 工具描述.md
 └── 规划.md
 ```
@@ -51,7 +52,7 @@ AiSync/
 ## 环境要求
 
 - Windows 当前支持最好
-- Python 3.11
+- Python 3.11，开发机需要；安装版已随包携带 Python runtime
 - Node.js 18+
 - Rust toolchain
 - Tauri 2 依赖
@@ -59,7 +60,6 @@ AiSync/
 可选：
 
 - `chromadb`：启用 Chroma 向量库后端
-- PyInstaller：发布打包后端 sidecar 时需要
 
 ## 安装依赖
 
@@ -123,7 +123,23 @@ npm run dev
 
 ## 打包发布
 
-发布态使用 `Tauri + PyInstaller 后端 sidecar`。
+发布态现在使用 `Tauri + 后端源码资源 + 内置 Python runtime`。打包时不再把后端临时编译成 PyInstaller exe；安装包会携带一个轻量 Python runtime 和后端依赖，安装后的桌面程序优先直接用随包 Python 启动 FastAPI 后端。
+
+### 修改版本号
+
+应用版本号的人工修改点只有一个：
+
+```text
+frontend/src-tauri/tauri.conf.json
+```
+
+修改：
+
+```json
+"version": "0.1.4"
+```
+
+前端启动状态、Rust 诊断日志和窗口标题都会从这个版本号派生。`frontend/package.json` 和 `frontend/src-tauri/Cargo.toml` 的版本当前只作为各自工具链包版本，不作为 AiSync 发布版本。
 
 一条命令构建完整安装包：
 
@@ -135,29 +151,67 @@ npm run tauri build
 构建过程会自动：
 
 1. 构建 React 前端
-2. 用 PyInstaller 将后端打成 `aisync-backend.exe`
-3. 拷贝到 `frontend/src-tauri/resources/backend/`
+2. 拷贝干净后端源码到 `frontend/src-tauri/resources/backend-src/`
+3. 如不存在内置 Python，则准备 `frontend/src-tauri/resources/runtime/python/`
 4. 构建 Tauri 安装包
 
 产物位置：
 
 ```text
-backend/dist/aisync-backend.exe
 frontend/src-tauri/target/release/bundle/msi/
 frontend/src-tauri/target/release/bundle/nsis/
 ```
 
-也可以只构建后端：
+运行安装版时，后端启动顺序是：
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/build_backend.ps1
-```
+1. 自动选择一个可用的 `127.0.0.1` 本地端口；如需固定端口，可设置 `AISYNC_BACKEND_PORT`
+2. 查找随包资源 `runtime/python/pythonw.exe` / `runtime/python/python.exe`
+3. 用随包 Python 直接启动 `python -m app.cli --host 127.0.0.1 --port <自动端口>`
+4. 前端通过 Tauri 命令读取真实 API 地址，不再写死 `8000`
+5. 如果随包 Python 不可用，回退到自动 venv
+6. venv 回退会查找 `%APPDATA%\com.aisync.app\runtime\.venv\Scripts\python.exe`
+7. 再查找 `AISYNC_PYTHON`
+8. 再查找系统 `python` / `py`
+9. 自动执行 `python -m venv ...` 和 `pip install <随包 backend-src>`
+
+用户不需要安装 Python，也不需要手动创建 venv。
 
 注意：
 
 - 开发态 `npm run tauri dev` 不会再打包后端
-- 发布态 `npm run tauri build` 才会打包后端
-- 如果构建时报 `os error 32`，通常是旧的 `aisync-backend.exe` 进程占用了文件，结束该进程后重试
+- 开发态仍默认使用 `127.0.0.1:8000`，方便源码调试
+- 发布态 `npm run tauri build` 不再跑 PyInstaller
+- 安装包已携带 `frontend/src-tauri/resources/runtime/python/python.exe`
+- 安装版会隐藏后端 Python 控制台窗口， stdout/stderr 写入日志文件
+- 如需强制跳过 runtime 自动准备，可设置 `AISYNC_SKIP_RUNTIME_PREP=1`
+
+手动准备内置 Python runtime：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare_runtime_python.ps1
+```
+
+可选：准备离线 wheels。
+
+默认交付包不携带 wheelhouse，因为 AiSync 本身仍依赖外部 LLM API，且当前安装版已经随包携带可直接运行的 Python runtime 和依赖。wheelhouse 只用于增强 venv 回退路径：当随包 runtime 不可用、客户机又不能联网安装依赖时才需要。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/prepare_runtime_wheels.ps1
+```
+
+如果要把 Chroma 依赖也打进离线 wheels：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/prepare_runtime_wheels.ps1 -IncludeVector
+```
+
+生成目录：
+
+```text
+frontend/src-tauri/resources/runtime/wheels/
+```
+
+安装版启动时如果发现该目录内有 `aisync-backend` wheel，会优先从 wheelhouse 离线安装；否则退回安装随包 `backend-src`。
 
 ## 运行日志
 
@@ -167,6 +221,8 @@ powershell -ExecutionPolicy Bypass -File scripts/build_backend.ps1
 %APPDATA%\com.aisync.app\startup-diagnostics.txt
 %LOCALAPPDATA%\com.aisync.app\logs\frontend.boot.log
 %LOCALAPPDATA%\com.aisync.app\logs\backend.last_start.txt
+%LOCALAPPDATA%\com.aisync.app\logs\backend.setup.out.log
+%LOCALAPPDATA%\com.aisync.app\logs\backend.setup.err.log
 %LOCALAPPDATA%\com.aisync.app\logs\backend.out.log
 %LOCALAPPDATA%\com.aisync.app\logs\backend.err.log
 ```
@@ -182,8 +238,8 @@ powershell -ExecutionPolicy Bypass -File scripts/build_backend.ps1
 
 - 当前版本
 - app data / log / resource 路径
-- 后端候选 exe 是否存在
-- `127.0.0.1:8000` 端口状态
+- Python / 后端源码 / 旧后端 exe 候选路径是否存在
+- 安装版实际使用的后端 API 地址、端口状态和健康检查状态
 - Tauri 管理的后端进程状态
 - 关键日志文件是否存在
 
@@ -431,7 +487,9 @@ npm run tauri build
 ## 当前注意事项
 
 - `npm run tauri dev` 是开发模式，不会打包后端
-- `npm run tauri build` 是发布模式，会打包后端 sidecar
+- `npm run tauri build` 是发布模式，会打包前端和后端源码资源
+- 安装版优先使用随包 `runtime/python/python.exe`，用户不需要安装 Python
+- 自动 venv 只是随包 runtime 不可用时的回退路径
 - 安装版侧栏的连接状态指 Agent WebSocket，不等同于后端是否启动
 - 没选择项目时 Agent 会显示未选择或未连接，这是正常状态
 - 中断不能强杀正在运行的工具内部逻辑，只会阻止后续 Agent 步骤

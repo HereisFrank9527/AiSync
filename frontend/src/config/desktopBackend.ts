@@ -1,5 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { getApiBase } from "./runtime";
+import { getApiBase, setApiBase } from "./runtime";
 
 let backendReadyPromise: Promise<void> | null = null;
 
@@ -15,11 +15,18 @@ async function backendDiagnostics() {
   }
 }
 
+async function loadBackendApiBase() {
+  const apiBase = await invoke<string>("backend_api_base");
+  setApiBase(apiBase);
+  return apiBase;
+}
+
 async function waitForBackendReady() {
   const deadline = Date.now() + 30_000;
   let lastError: unknown = null;
   while (Date.now() < deadline) {
     try {
+      await loadBackendApiBase();
       const response = await fetch(healthUrl(), { cache: "no-store" });
       if (response.ok) return;
       lastError = new Error(`health check returned ${response.status}`);

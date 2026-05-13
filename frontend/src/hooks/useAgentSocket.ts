@@ -5,6 +5,11 @@ import { api } from "../api/client";
 
 const LIVE_EVENT_LIMIT = 5000;
 
+interface SendOptions {
+  modelContent?: string;
+  metadata?: Record<string, unknown>;
+}
+
 function appendLiveEvent(current: AgentEvent[], event: AgentEvent) {
   if (event.type === "agent_final") {
     const last = current[current.length - 1];
@@ -99,14 +104,16 @@ export function useAgentSocket(
   }, []);
 
   const send = useCallback(
-    (content: string, enabledTools?: string[] | null) => {
+    (content: string, enabledTools?: string[] | null, options?: SendOptions) => {
       const payload: Record<string, unknown> = { type: "user_message", content };
+      if (options?.modelContent && options.modelContent !== content) payload.model_content = options.modelContent;
+      if (options?.metadata) payload.metadata = options.metadata;
       if (presetRef.current) payload.preset_id = presetRef.current;
       if (conversationId) payload.conversation_id = conversationId;
       if (enabledTools !== undefined) payload.enabled_tools = enabledTools;
       socketRef.current?.send(JSON.stringify(payload));
       setEvents((current) =>
-        appendLiveEvent(current, { type: "user_message", content, sender: "user" as const }),
+        appendLiveEvent(current, { type: "user_message", content, sender: "user" as const, metadata: options?.metadata }),
       );
     },
     [conversationId],

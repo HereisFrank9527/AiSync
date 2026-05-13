@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "AiSync 0.1.4",
+        "title": "AiSync",
         "width": 1280,
         "height": 800
       }
@@ -25,7 +25,8 @@
     ],
     "targets": "all",
     "resources": {
-      "resources/backend/": "backend/"
+      "resources/backend-src/": "backend-src/",
+      "resources/runtime/": "runtime/"
     }
   }
 }

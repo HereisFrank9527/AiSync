@@ -11,7 +11,11 @@ interface ChatPanelProps {
   conversationStatus?: ConversationStatus | null;
   conversationLastError?: string | null;
   tools: ToolDescriptor[];
-  onSend: (content: string, enabledTools?: string[] | null) => void;
+  onSend: (
+    content: string,
+    enabledTools?: string[] | null,
+    options?: { modelContent?: string; metadata?: Record<string, unknown> },
+  ) => void;
   onInterrupt: () => void;
   input: string;
   onInputChange: (value: string) => void;
@@ -22,18 +26,37 @@ interface ChatPanelProps {
 const INITIAL_HISTORY_WINDOW = 120;
 const HISTORY_PAGE_STEP = 80;
 const BOTTOM_STICKY_DISTANCE = 96;
+const REFERENCE_CONTEXT_HEADER = "[引用上下文，供本轮回复参考]";
+const REFERENCE_CONTEXT_FOOTER = "[/引用上下文]";
 
-/** 合并连续的 stream 事件为单条消息，去除 stream_end */
+/** 合并流式事件，并把同一轮的 stream + agent_final 折叠成一条消息。 */
 function mergeStreamEvents(events: AgentEvent[]): AgentEvent[] {
   const merged: AgentEvent[] = [];
   for (const event of events) {
     if (event.type === "stream_end") continue;
     if (event.type === "agent_final") {
-      const last = merged[merged.length - 1];
-      if (last?.type === "stream") {
-        last.type = "agent_final";
-        last.content = event.content ?? last.content;
-        last.conversation_id = event.conversation_id;
+      const lastUserIndex = findLastIndex(merged, (item) => item.sender === "user" && item.type === "user_message");
+      const duplicateFinalIndex = findLastIndex(
+        merged,
+        (item, index) =>
+          index > lastUserIndex &&
+          item.type === "agent_final" &&
+          normalizeContent(item.content) === normalizeContent(event.content),
+      );
+      if (duplicateFinalIndex >= 0) continue;
+
+      const streamIndex = findLastIndex(
+        merged,
+        (item, index) => index > lastUserIndex && item.type === "stream" && item.sender !== "user",
+      );
+      if (streamIndex >= 0) {
+        merged[streamIndex] = {
+          ...merged[streamIndex],
+          ...event,
+          type: "agent_final",
+          sender: "agent",
+          content: event.content ?? merged[streamIndex].content,
+        };
         continue;
       }
     }
@@ -49,6 +72,17 @@ function mergeStreamEvents(events: AgentEvent[]): AgentEvent[] {
     }
   }
   return merged;
+}
+
+function findLastIndex<T>(items: T[], predicate: (item: T, index: number) => boolean) {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (predicate(items[index], index)) return index;
+  }
+  return -1;
+}
+
+function normalizeContent(content?: string) {
+  return (content ?? "").replace(/\s+/g, " ").trim();
 }
 
 function memoryStatusText(event: AgentEvent) {
@@ -67,6 +101,10 @@ function memoryStatusText(event: AgentEvent) {
 
 function isSystemStatusEvent(event: AgentEvent) {
   return event.type === "memory_status" || event.type === "agent_limit_reached" || event.type === "agent_status";
+}
+
+function isTaskListEvent(event: AgentEvent) {
+  return event.type === "agent_task_list";
 }
 
 function systemStatusText(event: AgentEvent) {
@@ -157,6 +195,185 @@ function conversationStatusToWorkState(
   return { label: connected ? "已连接" : "未连接", kind: "idle" as const };
 }
 
+function isSelectableMessage(event: AgentEvent) {
+  if (!event.content?.trim()) return false;
+  if (event.sender === "user" && event.type === "user_message") return true;
+  return event.type === "agent_final" || event.type === "stream";
+}
+
+function messageRoleLabel(event: AgentEvent) {
+  return event.sender === "user" ? "用户" : "AI";
+}
+
+function formatSelectedMessages(events: AgentEvent[]) {
+  return events
+    .filter(isSelectableMessage)
+    .map((event) => `${messageRoleLabel(event)}：\n${event.content?.trim() ?? ""}`)
+    .join("\n\n---\n\n");
+}
+
+interface QuoteReference {
+  role: string;
+  content: string;
+  lineCount: number;
+}
+
+interface ReferencedUserContent {
+  content: string;
+  referenceLines: number;
+  referenceCount: number;
+}
+
+function quoteReferencesFromEvents(events: AgentEvent[]) {
+  return events
+    .filter(isSelectableMessage)
+    .map((event) => {
+      const content = (event.content ?? "").trim();
+      return {
+        role: messageRoleLabel(event),
+        content,
+        lineCount: countContentLines(content),
+      };
+    })
+    .filter((reference) => reference.content);
+}
+
+function countContentLines(content: string) {
+  return Math.max(1, content.split(/\r?\n/).filter((line) => line.trim()).length);
+}
+
+function summarizeQuoteReferences(references: QuoteReference[]) {
+  const lineCount = references.reduce((total, reference) => total + reference.lineCount, 0);
+  const messageCount = references.length;
+  return {
+    lineCount,
+    messageCount,
+    label: messageCount > 1 ? `引用 ${messageCount} 条消息 · ${lineCount} 行文字` : `引用 ${lineCount} 行文字`,
+  };
+}
+
+function buildModelMessageWithReferences(content: string, references: QuoteReference[]) {
+  const message = content.trim();
+  if (!references.length) return message;
+  const referenceBlock = references
+    .map((reference, index) => `[${index + 1}] ${reference.role}（${reference.lineCount}行）\n${reference.content}`)
+    .join("\n\n");
+  return `${message}\n\n${REFERENCE_CONTEXT_HEADER}\n${referenceBlock}\n${REFERENCE_CONTEXT_FOOTER}`;
+}
+
+function metadataReferencedUserContent(content: string, metadata?: Record<string, unknown>): ReferencedUserContent | null {
+  const referenceLines = Number(metadata?.quote_reference_lines ?? 0);
+  const referenceCount = Number(metadata?.quote_reference_count ?? 0);
+  if (referenceLines <= 0) return null;
+  return { content, referenceLines, referenceCount };
+}
+
+function markerReferencedUserContent(content?: string): ReferencedUserContent {
+  const raw = content ?? "";
+  const headerIndex = raw.lastIndexOf(REFERENCE_CONTEXT_HEADER);
+  if (headerIndex < 0) {
+    return { content: raw, referenceLines: 0, referenceCount: 0 };
+  }
+  const footerIndex = raw.indexOf(REFERENCE_CONTEXT_FOOTER, headerIndex + REFERENCE_CONTEXT_HEADER.length);
+  const referenceBlock = raw
+    .slice(headerIndex + REFERENCE_CONTEXT_HEADER.length, footerIndex >= 0 ? footerIndex : raw.length)
+    .trim();
+  const referenceLines = [...referenceBlock.matchAll(/（(\d+)行）/g)]
+    .reduce((total, match) => total + Number(match[1] || 0), 0);
+  const referenceCount = (referenceBlock.match(/^\[\d+\]/gm) ?? []).length;
+  return {
+    content: raw.slice(0, headerIndex).trimEnd(),
+    referenceLines: referenceLines || countContentLines(referenceBlock),
+    referenceCount,
+  };
+}
+
+function displayReferencedUserContent(content?: string, metadata?: Record<string, unknown>): ReferencedUserContent {
+  return metadataReferencedUserContent(content ?? "", metadata) ?? markerReferencedUserContent(content);
+}
+
+interface ChoiceOption {
+  label: string;
+  value: string;
+}
+
+interface AgentTaskItem {
+  label: string;
+  status: "pending" | "active" | "done" | "error";
+}
+
+interface AgentTaskList {
+  tasks: AgentTaskItem[];
+  activeLabel: string;
+  done: boolean;
+}
+
+function parseAgentTaskList(event?: AgentEvent): AgentTaskList | null {
+  const rawTasks = event?.metadata?.tasks;
+  if (!Array.isArray(rawTasks)) return null;
+  const tasks = rawTasks
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const record = item as Record<string, unknown>;
+      const label = typeof record.label === "string" ? record.label : "";
+      const rawStatus = typeof record.status === "string" ? record.status : "pending";
+      const status = ["pending", "active", "done", "error"].includes(rawStatus)
+        ? rawStatus as AgentTaskItem["status"]
+        : "pending";
+      return label ? { label, status } : null;
+    })
+    .filter((item): item is AgentTaskItem => Boolean(item));
+  if (!tasks.length) return null;
+  const active = tasks.find((task) => task.status === "active");
+  return {
+    tasks,
+    activeLabel: active?.label ?? (tasks.every((task) => task.status === "done") ? "任务已完成" : tasks[0].label),
+    done: tasks.every((task) => task.status === "done"),
+  };
+}
+
+function extractChoiceOptions(content?: string): ChoiceOption[] {
+  if (!content) return [];
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  const options: ChoiceOption[] = [];
+  let collecting = false;
+  let headingSeen = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      if (collecting && options.length > 0) break;
+      continue;
+    }
+    if (/(可选方案|下一步选项|选择一个|你可以选|请选择|几个方案|方案如下)/.test(line)) {
+      headingSeen = true;
+      collecting = true;
+      continue;
+    }
+
+    const item = /^(?:[-*]|\d+[.)、]|[A-Ha-h][.)、]|[一二三四五六七八九十]+[.)、])\s*(.+)$/.exec(line);
+    if (item && collecting) {
+      const value = cleanChoiceText(item[1]);
+      if (value) options.push({ label: value, value });
+      if (options.length >= 6) break;
+      continue;
+    }
+
+    if (collecting && options.length > 0) break;
+  }
+
+  if (!headingSeen || options.length < 2) return [];
+  return options;
+}
+
+function cleanChoiceText(value: string) {
+  return value
+    .replace(/\*\*/g, "")
+    .replace(/^["“]|["”]$/g, "")
+    .trim()
+    .slice(0, 160);
+}
+
 export default function ChatPanel({
   events,
   historyVersion,
@@ -177,10 +394,17 @@ export default function ChatPanel({
   const pendingScrollTargetRef = useRef<"top" | "bottom" | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [selectedTools, setSelectedTools] = useState<string[] | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedMessageIndexes, setSelectedMessageIndexes] = useState<Set<number>>(() => new Set());
+  const [quoteReferences, setQuoteReferences] = useState<QuoteReference[]>([]);
   const [visibleStart, setVisibleStart] = useState(0);
   const [liveStart, setLiveStart] = useState(0);
   const displayEvents = useMemo(() => mergeStreamEvents(events), [events]);
   const liveEvents = useMemo(() => displayEvents.slice(liveStart), [displayEvents, liveStart]);
+  const taskList = useMemo(() => {
+    const latest = [...liveEvents].reverse().find(isTaskListEvent);
+    return parseAgentTaskList(latest);
+  }, [liveEvents]);
   const workState = useMemo(
     () => liveEvents.length > 0
       ? getWorkState(liveEvents, connected)
@@ -191,6 +415,22 @@ export default function ChatPanel({
   const allToolsEnabled = selectedTools === null;
   const enabledToolCount = allToolsEnabled ? tools.length : selectedTools.length;
   const canSend = Boolean(input.trim() && connected && enabledToolCount > 0);
+  const quoteSummary = useMemo(() => summarizeQuoteReferences(quoteReferences), [quoteReferences]);
+  const visibleSelectableIndexes = useMemo(
+    () => visibleEvents
+      .map((event, index) => ({ event, index: visibleStart + index }))
+      .filter(({ event }) => isSelectableMessage(event))
+      .map(({ index }) => index),
+    [visibleEvents, visibleStart],
+  );
+  const selectedMessages = useMemo(
+    () => [...selectedMessageIndexes]
+      .sort((a, b) => a - b)
+      .map((index) => displayEvents[index])
+      .filter(Boolean)
+      .filter(isSelectableMessage),
+    [displayEvents, selectedMessageIndexes],
+  );
   const toolSummary = allToolsEnabled
     ? "全部工具"
     : enabledToolCount === 0
@@ -203,6 +443,7 @@ export default function ChatPanel({
     pendingScrollTargetRef.current = "bottom";
     setLiveStart(displayEvents.length);
     setVisibleStart(start);
+    setQuoteReferences([]);
   }, [historyVersion]);
 
   useEffect(() => {
@@ -237,23 +478,41 @@ export default function ChatPanel({
     });
   }, [tools]);
 
+  useEffect(() => {
+    setSelectedMessageIndexes((current) => {
+      const next = new Set<number>();
+      for (const index of current) {
+        if (isSelectableMessage(displayEvents[index])) next.add(index);
+      }
+      return next;
+    });
+  }, [displayEvents]);
+
+  const sendMessage = (content: string) => {
+    if (canSend) {
+      stickToBottomRef.current = true;
+      pendingScrollTargetRef.current = "bottom";
+      onSend(content.trim(), selectedTools, {
+        modelContent: buildModelMessageWithReferences(content, quoteReferences),
+        metadata: {
+          quote_reference_count: quoteSummary.messageCount,
+          quote_reference_lines: quoteSummary.lineCount,
+        },
+      });
+      onInputChange("");
+      setQuoteReferences([]);
+    }
+  };
+
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (canSend) {
-        onSend(input, selectedTools);
-        onInputChange("");
-      }
+      if (canSend) sendMessage(input);
     }
   };
 
   const handleSend = () => {
-    if (canSend) {
-      stickToBottomRef.current = true;
-      pendingScrollTargetRef.current = "bottom";
-      onSend(input, selectedTools);
-      onInputChange("");
-    }
+    if (canSend) sendMessage(input);
   };
 
   const handleScroll = () => {
@@ -286,6 +545,61 @@ export default function ChatPanel({
 
   const selectNoTools = () => {
     setSelectedTools([]);
+  };
+
+  const toggleMessageSelection = (index: number) => {
+    setSelectedMessageIndexes((current) => {
+      const next = new Set(current);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
+
+  const selectVisibleMessages = () => {
+    setSelectionMode(true);
+    setSelectedMessageIndexes((current) => new Set([...current, ...visibleSelectableIndexes]));
+  };
+
+  const clearSelectedMessages = () => {
+    setSelectedMessageIndexes(new Set());
+  };
+
+  const copySelectedMessages = async () => {
+    const content = formatSelectedMessages(selectedMessages);
+    if (!content) return;
+    await navigator.clipboard.writeText(content);
+  };
+
+  const quoteSelectedIntoInput = () => {
+    const references = quoteReferencesFromEvents(selectedMessages);
+    if (!references.length) return;
+    setQuoteReferences(references);
+  };
+
+  const copySingleMessage = async (event: AgentEvent) => {
+    if (!event.content?.trim()) return;
+    await navigator.clipboard.writeText(`${messageRoleLabel(event)}：\n${event.content.trim()}`);
+  };
+
+  const quoteSingleMessage = (event: AgentEvent) => {
+    if (!event.content?.trim()) return;
+    setQuoteReferences(quoteReferencesFromEvents([event]));
+  };
+
+  const chooseOption = (option: ChoiceOption) => {
+    if (!connected) return;
+    stickToBottomRef.current = true;
+    pendingScrollTargetRef.current = "bottom";
+    const content = `我选择：${option.value}`;
+    onSend(content, selectedTools, {
+      modelContent: buildModelMessageWithReferences(content, quoteReferences),
+      metadata: {
+        quote_reference_count: quoteSummary.messageCount,
+        quote_reference_lines: quoteSummary.lineCount,
+      },
+    });
+    setQuoteReferences([]);
   };
 
   const renderAgentContent = (event: AgentEvent, isStreaming: boolean, isLast: boolean) => {
@@ -332,6 +646,15 @@ export default function ChatPanel({
             <span className="chat-work-indicator-icon" aria-hidden="true" />
             <span className="chat-work-indicator-text">{workState.label}</span>
           </div>
+          <button
+            className={selectionMode ? "btn-secondary" : "btn-ghost"}
+            onClick={() => {
+              setSelectionMode((value) => !value);
+              if (selectionMode) clearSelectedMessages();
+            }}
+          >
+            选择
+          </button>
           <div className="chat-tool-picker">
             <button className="btn-secondary" onClick={() => setToolsOpen((value) => !value)}>
               工具 {enabledToolCount}/{tools.length}
@@ -382,7 +705,41 @@ export default function ChatPanel({
         </div>
       </header>
 
+      {taskList && (
+        <div className={`chat-task-panel${taskList.done ? " is-done" : ""}`}>
+          <div className="chat-task-panel-head">
+            <strong>Agent 任务</strong>
+            <span>{taskList.activeLabel}</span>
+          </div>
+          <ol className="chat-task-list">
+            {taskList.tasks.map((task, index) => (
+              <li key={`${task.label}-${index}`} className={`is-${task.status}`}>
+                <span className="chat-task-marker" aria-hidden="true" />
+                <span>{task.label}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
       <div className="chat-messages" ref={messagesRef} onScroll={handleScroll}>
+        {selectionMode && (
+          <div className="chat-selection-bar">
+            <span>已选 {selectedMessages.length} 条</span>
+            <button className="btn-ghost" onClick={selectVisibleMessages} disabled={visibleSelectableIndexes.length === 0}>
+              全选可见
+            </button>
+            <button className="btn-ghost" onClick={copySelectedMessages} disabled={selectedMessages.length === 0}>
+              复制
+            </button>
+            <button className="btn-ghost" onClick={quoteSelectedIntoInput} disabled={selectedMessages.length === 0}>
+              引用
+            </button>
+            <button className="btn-ghost" onClick={clearSelectedMessages} disabled={selectedMessages.length === 0}>
+              清空
+            </button>
+          </div>
+        )}
         {displayEvents.length === 0 && (
           <div className="chat-empty">发送消息开始对话</div>
         )}
@@ -395,12 +752,18 @@ export default function ChatPanel({
           </div>
         )}
         {visibleEvents.map((event, i) => {
+          const eventIndex = visibleStart + i;
           const isUser = event.sender === "user";
           const isSystemStatus = isSystemStatusEvent(event);
           const isError = isErrorEvent(event);
           const isToolStatus = isToolStatusEvent(event);
           const isStreaming = event.type === "stream";
           const isLast = i === visibleEvents.length - 1;
+          const selectable = isSelectableMessage(event);
+          const selected = selectedMessageIndexes.has(eventIndex);
+          const choiceOptions = !isUser && event.type === "agent_final" ? extractChoiceOptions(event.content) : [];
+          const userDisplay = isUser ? displayReferencedUserContent(event.content, event.metadata) : null;
+          if (isTaskListEvent(event)) return null;
           if (isSystemStatus) {
             return (
               <div key={i} className="chat-message chat-message--system">
@@ -429,17 +792,60 @@ export default function ChatPanel({
             );
           }
           return (
-            <div key={i} className={`chat-message ${isUser ? "chat-message--user" : "chat-message--agent"}`}>
+            <div
+              key={eventIndex}
+              className={`chat-message ${isUser ? "chat-message--user" : "chat-message--agent"}${selected ? " is-selected" : ""}${selectionMode && selectable ? " is-selectable" : ""}`}
+            >
+              {selectionMode && selectable && (
+                <label className="chat-message-select" title="选择这条消息">
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={() => toggleMessageSelection(eventIndex)}
+                  />
+                </label>
+              )}
               {!isUser && event.type !== "stream" && (
                 <div className="chat-message-type">{event.type}</div>
               )}
               {isUser && event.content && (
                 <div className={`chat-message-body${isStreaming && isLast ? " chat-message-body--streaming" : ""}`}>
-                  {event.content}
+                  {userDisplay && userDisplay.referenceLines > 0 && (
+                    <div className="chat-message-reference-summary">
+                      {userDisplay.referenceCount > 1
+                        ? `引用 ${userDisplay.referenceCount} 条消息 · ${userDisplay.referenceLines} 行文字`
+                        : `引用 ${userDisplay.referenceLines} 行文字`}
+                    </div>
+                  )}
+                  {userDisplay?.content ?? event.content}
                   {isStreaming && isLast && <span className="chat-cursor" />}
                 </div>
               )}
               {!isUser && renderAgentContent(event, isStreaming, isLast)}
+              {choiceOptions.length > 0 && (
+                <div className="chat-choice-options">
+                  <span>选择一个继续</span>
+                  {choiceOptions.map((option, optionIndex) => (
+                    <button
+                      key={`${option.value}-${optionIndex}`}
+                      className="chat-choice-option"
+                      onClick={() => chooseOption(option)}
+                      disabled={!connected}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {selectable && (
+                <div className="chat-message-actions">
+                  <button className="btn-ghost" onClick={() => void copySingleMessage(event)}>复制</button>
+                  <button className="btn-ghost" onClick={() => quoteSingleMessage(event)}>引用</button>
+                  <button className="btn-ghost" onClick={() => toggleMessageSelection(eventIndex)}>
+                    {selected ? "取消选择" : "选择"}
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}
@@ -449,6 +855,16 @@ export default function ChatPanel({
       <div className="chat-input-area">
         {!allToolsEnabled && enabledToolCount === 0 && (
           <p className="chat-input-warning">至少选择一个工具，或恢复默认全部工具。</p>
+        )}
+        {quoteReferences.length > 0 && (
+          <div className="chat-reference-box">
+            <div>
+              <strong>{quoteSummary.label}</strong>
+            </div>
+            <button className="btn-ghost" onClick={() => setQuoteReferences([])}>
+              取消
+            </button>
+          </div>
         )}
         <div className="chat-input-row">
           <textarea

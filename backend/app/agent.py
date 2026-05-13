@@ -15,16 +15,95 @@ FrontendPublisher = Callable[[dict[str, Any]], Awaitable[None]]
 
 SYSTEM_PROMPT = """你是 AiSync 的主 Agent，负责辅助用户创作长篇小说。
 优先使用工具读写项目文件，保持章节、角色、世界观和剧情设定一致。
-工具结果会同步到前端；最终回答应简洁说明完成了什么或还需要用户提供什么。"""
+工具结果会同步到前端；最终回答应简洁说明完成了什么或还需要用户提供什么。
+当需要用户在多个方案中选择时，用“可选方案：”或“下一步选项：”开头，并输出 2-6 个清晰的编号列表项。"""
 
 MAX_MEMORY_MESSAGES = 24
 MAX_MEMORY_CHARS = 24000
 MAX_SINGLE_MEMORY_MESSAGE_CHARS = 4000
 MAX_AGENT_ITERATIONS = 8
 
+TASK_PLAN_DEFAULT = [
+    "理解请求",
+    "检索相关上下文",
+    "分析与整合",
+    "输出回复",
+]
+TASK_PLAN_WRITING = [
+    "检索相关设定",
+    "梳理章节目标",
+    "调用写作工具",
+    "整理写作结果",
+    "输出回复",
+]
+TASK_PLAN_WORLDVIEW = [
+    "检索相关设定",
+    "检查设定冲突",
+    "更新世界观文档",
+    "整理修改结果",
+    "输出回复",
+]
+TASK_PLAN_CHARACTER = [
+    "检索角色档案",
+    "比对人物关系",
+    "更新角色信息",
+    "整理角色结果",
+    "输出回复",
+]
+TASK_PLAN_OUTLINE = [
+    "读取大纲结构",
+    "梳理剧情节点",
+    "更新大纲节点",
+    "整理修改结果",
+    "输出回复",
+]
+TASK_PLAN_CONSISTENCY = [
+    "检索相关设定",
+    "对照冲突点",
+    "执行一致性检查",
+    "整理问题建议",
+    "输出回复",
+]
+TASK_PLAN_SEARCH = [
+    "检索项目索引",
+    "汇总命中片段",
+    "整理引用路径",
+    "输出结果",
+]
+
 
 class AgentInterrupted(Exception):
     pass
+
+
+def build_task_plan(user_input: str, tool_names: set[str] | None = None) -> list[str]:
+    text = user_input.lower()
+    names = tool_names or set()
+    if "consistency_check" in names or any(
+        keyword in text for keyword in ["一致性", "冲突", "矛盾", "检查设定"]
+    ):
+        return TASK_PLAN_CONSISTENCY
+    if "write_chapter" in names or "edit_chapter" in names or any(
+        keyword in text for keyword in ["续写", "写章节", "章节", "写作"]
+    ):
+        return TASK_PLAN_WRITING
+    if "update_worldview" in names or any(
+        keyword in text for keyword in ["世界观", "设定", "地理", "历史", "规则"]
+    ):
+        return TASK_PLAN_WORLDVIEW
+    if "create_character" in names or any(
+        keyword in text for keyword in ["角色", "人物档案", "人设", "角色卡"]
+    ):
+        return TASK_PLAN_CHARACTER
+    if "outline_generate" in names or "plot_outline" in names or any(
+        keyword in text for keyword in ["大纲", "剧情", "情节", "节点"]
+    ):
+        return TASK_PLAN_OUTLINE
+    if "search_project" in names or any(
+        keyword in text for keyword in ["搜索", "查找", "检索", "引用路径", "资料"]
+    ):
+        return TASK_PLAN_SEARCH
+    return TASK_PLAN_DEFAULT
 
 
 class MasterAgent:
@@ -61,9 +140,15 @@ class MasterAgent:
         self._interrupted = False
         self._running = True
         try:
-            effective_tools = set(enabled_tools) if override_enabled_tools and enabled_tools is not None else self.enabled_tools
+            effective_tools = (
+                set(enabled_tools)
+                if override_enabled_tools and enabled_tools is not None
+                else self.enabled_tools
+            )
             if override_enabled_tools and enabled_tools is None:
                 effective_tools = None
+            task_plan = build_task_plan(user_input)
+            await self._push_task_list(task_plan, 0, "retrieving")
             await self._push_agent_status("正在检索项目上下文", "retrieving")
             relevant_context = await self.vector_store.query(user_input)
             messages = self._build_initial_messages(
@@ -72,8 +157,14 @@ class MasterAgent:
                 history or [],
                 memory_summary or "",
             )
+            await self._push_task_list(task_plan, min(1, len(task_plan) - 1), "thinking")
+            context_status = (
+                f"已注入 {len(relevant_context)} 条相关上下文"
+                if relevant_context
+                else "未检索到相关上下文，使用对话历史继续"
+            )
             await self._push_agent_status(
-                f"已注入 {len(relevant_context)} 条相关上下文" if relevant_context else "未检索到相关上下文，使用对话历史继续",
+                context_status,
                 "context_ready",
                 {"context_count": len(relevant_context)},
             )
@@ -99,6 +190,12 @@ class MasterAgent:
                 iterations += 1
 
                 await self._push_agent_status("正在请求模型", "thinking", {"iteration": iterations})
+                await self._push_task_list(
+                    task_plan,
+                    min(1, len(task_plan) - 1),
+                    "thinking",
+                    {"iteration": iterations},
+                )
                 try:
                     response = await self.llm.chat(
                         ChatRequest(
@@ -116,11 +213,38 @@ class MasterAgent:
                     return await self._finish_interrupted()
 
                 if not response.tool_calls:
+                    final_index = len(task_plan) - 1
+                    await self._push_task_list(
+                        task_plan,
+                        final_index,
+                        "finalizing",
+                        {"iteration": iterations},
+                    )
                     await self._push_agent_status("回复已生成", "done", {"iteration": iterations})
+                    await self._push_task_list(
+                        task_plan,
+                        len(task_plan),
+                        "done",
+                        {"iteration": iterations},
+                    )
                     return response.text
 
+                tool_names = {
+                    name
+                    for call in response.tool_calls
+                    if (name := self._tool_call_value(call, "name"))
+                }
+                refined_task_plan = build_task_plan(user_input, tool_names)
+                if refined_task_plan != task_plan:
+                    task_plan = refined_task_plan
                 await self._push_agent_status(
                     f"模型请求调用 {len(response.tool_calls)} 个工具",
+                    "tool_calling",
+                    {"iteration": iterations, "tool_calls": len(response.tool_calls)},
+                )
+                await self._push_task_list(
+                    task_plan,
+                    min(2, len(task_plan) - 1),
                     "tool_calling",
                     {"iteration": iterations, "tool_calls": len(response.tool_calls)},
                 )
@@ -152,6 +276,12 @@ class MasterAgent:
                         }
                     )
                 messages.append({"role": "user", "content": tool_results})
+                await self._push_task_list(
+                    task_plan,
+                    len(task_plan) - 1,
+                    "finalizing",
+                    {"iteration": iterations},
+                )
         finally:
             self._running = False
 
@@ -290,6 +420,40 @@ class MasterAgent:
         if metadata:
             data.update(metadata)
         await self._push_agent_event("agent_status", content, data)
+
+    async def _push_task_list(
+        self,
+        task_plan: list[str],
+        current_index: int,
+        phase: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        if not self.publisher:
+            return
+        tasks = []
+        safe_index = max(0, current_index)
+        for index, label in enumerate(task_plan):
+            if index < safe_index:
+                status = "done"
+            elif index == safe_index:
+                status = "active"
+            else:
+                status = "pending"
+            if safe_index >= len(task_plan):
+                status = "done"
+            tasks.append({"label": label, "status": status})
+        payload: dict[str, Any] = {
+            "type": "agent_task_list",
+            "content": "Agent 任务列表已更新",
+            "metadata": {
+                "phase": phase,
+                "current_task_index": min(safe_index, len(task_plan)),
+                "tasks": tasks,
+            },
+        }
+        if metadata:
+            payload["metadata"].update(metadata)
+        await self.publisher(payload)
 
     async def _push_tool_event(
         self,

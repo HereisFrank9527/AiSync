@@ -12,7 +12,12 @@ function normalizeBase(value: string | undefined) {
 export function getApiBase() {
   const injected = typeof window !== "undefined" ? window.__AISYNC_API_BASE__ : undefined;
   const envBase = import.meta.env.VITE_API_BASE as string | undefined;
-  return normalizeBase(injected || envBase || "http://localhost:8000/api");
+  return normalizeBase(injected || envBase || "http://127.0.0.1:8000/api");
+}
+
+export function setApiBase(value: string) {
+  if (typeof window === "undefined") return;
+  window.__AISYNC_API_BASE__ = normalizeBase(value);
 }
 
 export function apiBaseToWsBase(apiBase = getApiBase()) {

@@ -45,7 +45,11 @@ frontend/src-tauri/target/
 frontend/src-tauri/gen/
 frontend/src-tauri/.tauri/
 frontend/src-tauri/Cargo.lock.tmp
-frontend/src-tauri/resources/backend/aisync-backend.exe
+frontend/src-tauri/resources/backend/*
+!frontend/src-tauri/resources/backend/.gitkeep
+frontend/src-tauri/resources/backend-src/
+frontend/src-tauri/resources/runtime/
+.runtime-cache/
 
 # ===== IDE / Editor =====
 .vscode/
@@ -68,6 +72,7 @@ operation.log
 *.sqlite
 *.sqlite3
 *.db
+*.local.md
 
 # ===== Vector DB =====
 .vectordb/

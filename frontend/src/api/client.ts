@@ -1,10 +1,8 @@
 import { getApiBase } from "../config/runtime";
 
-const BASE = getApiBase();
-
 /** 通用 fetch 封装 */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${getApiBase()}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...init,
   });

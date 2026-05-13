@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Preset, LLMParams, AgentBehavior, ToolDescriptor } from "../../types";
+import { checkLatestRelease, type UpdateInfo } from "../../config/updateCheck";
 import "./SettingsPanel.css";
 
 const PROVIDERS = ["anthropic", "openai", "custom"] as const;
@@ -47,6 +48,9 @@ export default function SettingsPanel({
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [modelLoading, setModelLoading] = useState(false);
   const [modelError, setModelError] = useState("");
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateError, setUpdateError] = useState("");
 
   useEffect(() => {
     if (!activePreset) return;
@@ -196,6 +200,23 @@ export default function SettingsPanel({
     setBehavior({ ...activePreset.behavior });
     setMessage("");
   };
+
+  const handleCheckUpdate = async () => {
+    setCheckingUpdate(true);
+    setUpdateError("");
+    try {
+      setUpdateInfo(await checkLatestRelease());
+    } catch (error) {
+      setUpdateInfo(null);
+      setUpdateError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
+  const preferredInstaller = updateInfo?.assets.find((asset) => /\.exe$/i.test(asset.name))
+    ?? updateInfo?.assets.find((asset) => /\.(msi|zip)$/i.test(asset.name))
+    ?? updateInfo?.assets[0];
 
   return (
     <div className="settings-panel">
@@ -472,6 +493,44 @@ export default function SettingsPanel({
             )}
           </div>
         )}
+
+        <div className="settings-section">
+          <h3>应用更新</h3>
+          <div className="settings-update-panel">
+            <div>
+              <strong>当前版本：{__AISYNC_APP_VERSION__}</strong>
+              <p>从 GitHub Releases 检查新版本；轻量版只提示并打开下载页。</p>
+            </div>
+            <button className="btn-secondary" onClick={handleCheckUpdate} disabled={checkingUpdate}>
+              {checkingUpdate ? "检查中…" : "检查更新"}
+            </button>
+          </div>
+          {updateInfo && (
+            <div className={`settings-update-result${updateInfo.hasUpdate ? " has-update" : ""}`}>
+              <strong>
+                {updateInfo.hasUpdate
+                  ? `发现新版本 ${updateInfo.latestVersion}`
+                  : `已是最新版本 ${updateInfo.currentVersion}`}
+              </strong>
+              <span>{updateInfo.releaseName}</span>
+              {updateInfo.publishedAt && (
+                <span>{new Date(updateInfo.publishedAt).toLocaleString()}</span>
+              )}
+              {updateInfo.body && <p>{updateInfo.body.slice(0, 260)}</p>}
+              <div className="settings-update-actions">
+                {preferredInstaller && (
+                  <a className="btn-primary" href={preferredInstaller.url} target="_blank" rel="noreferrer">
+                    下载安装包
+                  </a>
+                )}
+                <a className="btn-secondary" href={updateInfo.releaseUrl} target="_blank" rel="noreferrer">
+                  打开发布页
+                </a>
+              </div>
+            </div>
+          )}
+          {updateError && <p className="settings-msg error">{updateError}</p>}
+        </div>
       </div>
     </div>
   );
