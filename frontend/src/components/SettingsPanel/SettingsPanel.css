@@ -29,16 +29,45 @@
   padding: var(--space-lg);
 }
 
-.settings-section {
-  max-width: var(--content-max-width);
-  margin: 0 auto var(--space-xl);
+.settings-sections-grid {
+  display: grid;
+  gap: var(--space-lg);
+  max-width: 1080px;
+  margin: 0 auto;
 }
 
-.settings-section h3 {
-  margin: 0 0 var(--space-md);
+.settings-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  overflow: hidden;
+}
+
+.settings-card-header {
+  padding: var(--space-md) var(--space-lg) var(--space-sm);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+
+.settings-card-header h3 {
+  margin: 0;
   font-size: var(--font-size-base);
   font-weight: 600;
-  color: var(--color-text);
+}
+
+.settings-card-header p {
+  margin: 4px 0 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.settings-card-body {
+  padding: var(--space-lg);
+}
+
+.settings-card--actions .settings-card-body {
+  display: flex;
+  flex-direction: column;
 }
 
 /* ── Preset bar ── */
@@ -209,7 +238,6 @@
 .settings-actions {
   display: flex;
   gap: var(--space-sm);
-  margin-top: var(--space-lg);
 }
 
 /* ── Message ── */
@@ -284,6 +312,33 @@
   text-decoration: none;
 }
 
+.settings-diagnostics-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.settings-diagnostics {
+  max-height: 260px;
+  overflow: auto;
+  margin: var(--space-sm) 0 0;
+  padding: var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.settings-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-md);
+}
+
 .settings-loading {
   padding: var(--space-lg);
   text-align: center;
@@ -292,7 +347,19 @@
 }
 
 @media (max-width: 760px) {
+  .settings-sections-grid {
+    gap: var(--space-md);
+  }
+
+  .settings-card-body {
+    padding: var(--space-md);
+  }
+
   .settings-tools-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-grid-2 {
     grid-template-columns: 1fr;
   }
 

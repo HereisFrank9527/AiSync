@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import type { Preset, LLMParams, AgentBehavior, ToolDescriptor } from "../../types";
-import { checkLatestRelease, type UpdateInfo } from "../../config/updateCheck";
+import { checkLatestRelease, formatAssetSize, openExternalUrl, type UpdateInfo } from "../../config/updateCheck";
 import "./SettingsPanel.css";
 
 const PROVIDERS = ["anthropic", "openai", "custom"] as const;
@@ -51,6 +52,9 @@ export default function SettingsPanel({
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateError, setUpdateError] = useState("");
+  const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
+  const [diagnostics, setDiagnostics] = useState("");
+  const [diagnosticsMessage, setDiagnosticsMessage] = useState("");
 
   useEffect(() => {
     if (!activePreset) return;
@@ -206,6 +210,7 @@ export default function SettingsPanel({
     setUpdateError("");
     try {
       setUpdateInfo(await checkLatestRelease());
+      setLastCheckedAt(new Date().toLocaleString());
     } catch (error) {
       setUpdateInfo(null);
       setUpdateError(error instanceof Error ? error.message : String(error));
@@ -214,20 +219,67 @@ export default function SettingsPanel({
     }
   };
 
-  const preferredInstaller = updateInfo?.assets.find((asset) => /\.exe$/i.test(asset.name))
-    ?? updateInfo?.assets.find((asset) => /\.(msi|zip)$/i.test(asset.name))
-    ?? updateInfo?.assets[0];
+  const preferredInstaller = updateInfo?.preferredAsset ?? null;
 
-  return (
-    <div className="settings-panel">
-      <header className="settings-header">
-        <h2>设置</h2>
-      </header>
+  const handleOpenInstaller = async () => {
+    if (!preferredInstaller) return;
+    const opened = await openExternalUrl(preferredInstaller.url);
+    if (!opened) setUpdateError(`无法打开下载链接：${preferredInstaller.name}`);
+  };
 
-      <div className="settings-body">
-        {/* ── Preset selector ── */}
-        <div className="settings-section">
-          <h3>预设</h3>
+  const handleOpenRelease = async () => {
+    if (!updateInfo) return;
+    const opened = await openExternalUrl(updateInfo.releaseUrl);
+    if (!opened) setUpdateError(`无法打开发布页：${updateInfo.releaseUrl}`);
+  };
+
+  const handleLoadDiagnostics = async () => {
+    setDiagnosticsMessage("");
+    try {
+      const text = isTauri()
+        ? await invoke<string>("backend_diagnostics")
+        : "当前不在 Tauri 桌面环境，无法读取桌面诊断。";
+      setDiagnostics(text);
+    } catch (error) {
+      setDiagnosticsMessage(`读取诊断失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const handleCopyDiagnostics = async () => {
+    const text = diagnostics || (isTauri() ? await invoke<string>("backend_diagnostics") : "");
+    if (!text) {
+      setDiagnosticsMessage("没有可复制的诊断信息");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setDiagnostics(text);
+      setDiagnosticsMessage("诊断信息已复制");
+    } catch (error) {
+      setDiagnosticsMessage(`复制失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const handleOpenLogDir = async () => {
+    try {
+      if (!isTauri()) {
+        setDiagnosticsMessage("当前不在 Tauri 桌面环境，无法打开日志目录");
+        return;
+      }
+      await invoke("open_log_dir");
+      setDiagnosticsMessage("已打开日志目录");
+    } catch (error) {
+      setDiagnosticsMessage(`打开日志目录失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const updateSections = [
+    {
+      id: "profile",
+      title: "预设管理",
+      description: "管理当前 LLM 预设、复制、重命名和删除。",
+      body: (
+        <>
           <div className="preset-bar">
             <select
               className="preset-select"
@@ -269,10 +321,7 @@ export default function SettingsPanel({
               <button className="btn-primary" onClick={handleCreate}>
                 创建
               </button>
-              <button
-                className="btn-ghost"
-                onClick={() => { setShowNew(false); setNewName(""); }}
-              >
+              <button className="btn-ghost" onClick={() => { setShowNew(false); setNewName(""); }}>
                 取消
               </button>
             </div>
@@ -289,40 +338,31 @@ export default function SettingsPanel({
               <button className="btn-primary" onClick={handleRename}>
                 保存
               </button>
-              <button
-                className="btn-ghost"
-                onClick={() => {
-                  setShowRename(false);
-                  setRenameName(activePreset.name);
-                }}
-              >
+              <button className="btn-ghost" onClick={() => {
+                setShowRename(false);
+                setRenameName(activePreset.name);
+              }}>
                 取消
               </button>
             </div>
           )}
 
-          {readonly && (
-            <p className="settings-hint">内置预设不可编辑，请新建预设后修改。</p>
-          )}
-        </div>
-
-        {/* ── LLM config ── */}
-        <div className="settings-section">
-          <h3>LLM 配置</h3>
-
+          {readonly && <p className="settings-hint">内置预设不可编辑，请新建预设后修改。</p>}
+        </>
+      ),
+    },
+    {
+      id: "llm",
+      title: "LLM 配置",
+      description: "切换提供商、模型、API 地址和推理参数。",
+      body: (
+        <>
           <div className="settings-field">
             <label>Provider</label>
-            <select
-              value={llm.provider}
-              onChange={(e) => patchLlm("provider", e.target.value)}
-              disabled={readonly}
-            >
-              {PROVIDERS.map((p) => (
-                <option key={p} value={p}>{p}</option>
-              ))}
+            <select value={llm.provider} onChange={(e) => patchLlm("provider", e.target.value)} disabled={readonly}>
+              {PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
           </div>
-
           <div className="settings-field">
             <label>API Key</label>
             <input
@@ -333,16 +373,10 @@ export default function SettingsPanel({
               disabled={readonly}
             />
           </div>
-
           <div className="settings-field">
             <label>API Key 环境变量（备用）</label>
-            <input
-              value={llm.api_key_env}
-              onChange={(e) => patchLlm("api_key_env", e.target.value)}
-              disabled={readonly}
-            />
+            <input value={llm.api_key_env} onChange={(e) => patchLlm("api_key_env", e.target.value)} disabled={readonly} />
           </div>
-
           <div className="settings-field">
             <label>API Base URL</label>
             <input
@@ -352,7 +386,6 @@ export default function SettingsPanel({
               disabled={readonly}
             />
           </div>
-
           <div className="settings-field">
             <label>模型名称</label>
             <input
@@ -381,65 +414,42 @@ export default function SettingsPanel({
             </div>
             {modelError && <p className="settings-msg error">{modelError}</p>}
           </div>
-
-          <div className="settings-field">
-            <label>Max Tokens</label>
-            <input
-              type="number"
-              value={llm.max_tokens}
-              onChange={(e) => patchLlm("max_tokens", Number(e.target.value))}
-              disabled={readonly}
-            />
+          <div className="settings-grid-2">
+            <div className="settings-field">
+              <label>Max Tokens</label>
+              <input type="number" value={llm.max_tokens} onChange={(e) => patchLlm("max_tokens", Number(e.target.value))} disabled={readonly} />
+            </div>
+            <div className="settings-field">
+              <label>Effort</label>
+              <select value={llm.effort} onChange={(e) => patchLlm("effort", e.target.value)} disabled={readonly}>
+                {EFFORTS.map((e) => <option key={e} value={e}>{e}</option>)}
+              </select>
+            </div>
           </div>
-
-          <div className="settings-field">
-            <label>Effort</label>
-            <select
-              value={llm.effort}
-              onChange={(e) => patchLlm("effort", e.target.value)}
-              disabled={readonly}
-            >
-              {EFFORTS.map((e) => (
-                <option key={e} value={e}>{e}</option>
-              ))}
-            </select>
-          </div>
-
           <label className="settings-checkbox">
-            <input
-              type="checkbox"
-              checked={llm.enable_thinking}
-              onChange={(e) => patchLlm("enable_thinking", e.target.checked)}
-              disabled={readonly}
-            />
+            <input type="checkbox" checked={llm.enable_thinking} onChange={(e) => patchLlm("enable_thinking", e.target.checked)} disabled={readonly} />
             启用 Thinking
           </label>
-
           <label className="settings-checkbox">
-            <input
-              type="checkbox"
-              checked={llm.prompt_cache}
-              onChange={(e) => patchLlm("prompt_cache", e.target.checked)}
-              disabled={readonly}
-            />
+            <input type="checkbox" checked={llm.prompt_cache} onChange={(e) => patchLlm("prompt_cache", e.target.checked)} disabled={readonly} />
             Prompt Cache
           </label>
-        </div>
-
-        {/* ── System Prompt ── */}
-        <div className="settings-section">
-          <h3>Agent 行为</h3>
+        </>
+      ),
+    },
+    {
+      id: "agent",
+      title: "Agent 行为",
+      description: "控制系统提示词、工具权限和主 Agent 默认行为。",
+      body: (
+        <>
           <div className="settings-field">
             <label>System Prompt（留空使用默认）</label>
             <textarea
               className="settings-textarea"
               rows={6}
               value={behavior.system_prompt ?? ""}
-              onChange={(e) =>
-                setBehavior((b) =>
-                  b ? { ...b, system_prompt: e.target.value || null } : b,
-                )
-              }
+              onChange={(e) => setBehavior((b) => b ? { ...b, system_prompt: e.target.value || null } : b)}
               disabled={readonly}
               placeholder="自定义 system prompt…"
             />
@@ -475,31 +485,20 @@ export default function SettingsPanel({
               </div>
             )}
           </div>
-        </div>
-
-        {/* ── Actions ── */}
-        {!readonly && (
-          <div className="settings-section">
-            <div className="settings-actions">
-              <button className="btn-primary" onClick={handleSave} disabled={saving}>
-                {saving ? "保存中…" : "保存设置"}
-              </button>
-              <button className="btn-secondary" onClick={handleReset} disabled={saving}>
-                重置
-              </button>
-            </div>
-            {message && (
-              <p className={`settings-msg${isError ? " error" : ""}`}>{message}</p>
-            )}
-          </div>
-        )}
-
-        <div className="settings-section">
-          <h3>应用更新</h3>
+        </>
+      ),
+    },
+    {
+      id: "update",
+      title: "应用更新",
+      description: "检查 GitHub Releases 最新版本，优先打开 NSIS 安装包。",
+      body: (
+        <>
           <div className="settings-update-panel">
             <div>
               <strong>当前版本：{__AISYNC_APP_VERSION__}</strong>
-              <p>从 GitHub Releases 检查新版本；轻量版只提示并打开下载页。</p>
+              <p>当前轻量更新模式只检查新版本并打开下载页，不会后台静默安装。</p>
+              {lastCheckedAt && <p>上次检查：{lastCheckedAt}</p>}
             </div>
             <button className="btn-secondary" onClick={handleCheckUpdate} disabled={checkingUpdate}>
               {checkingUpdate ? "检查中…" : "检查更新"}
@@ -508,29 +507,98 @@ export default function SettingsPanel({
           {updateInfo && (
             <div className={`settings-update-result${updateInfo.hasUpdate ? " has-update" : ""}`}>
               <strong>
-                {updateInfo.hasUpdate
-                  ? `发现新版本 ${updateInfo.latestVersion}`
-                  : `已是最新版本 ${updateInfo.currentVersion}`}
+              {updateInfo.hasUpdate ? `发现新版本 ${updateInfo.latestVersion}` : `已是最新版本 ${updateInfo.currentVersion}`}
               </strong>
-              <span>{updateInfo.releaseName}</span>
-              {updateInfo.publishedAt && (
-                <span>{new Date(updateInfo.publishedAt).toLocaleString()}</span>
-              )}
+              <span>发布：{updateInfo.releaseName}</span>
+              {updateInfo.publishedAt && <span>时间：{new Date(updateInfo.publishedAt).toLocaleString()}</span>}
+              <span>安装包：{preferredInstaller ? `${preferredInstaller.name} · ${formatAssetSize(preferredInstaller.size)}` : "未找到可下载资产"}</span>
+              <span>资产数：{updateInfo.assets.length}</span>
               {updateInfo.body && <p>{updateInfo.body.slice(0, 260)}</p>}
               <div className="settings-update-actions">
                 {preferredInstaller && (
-                  <a className="btn-primary" href={preferredInstaller.url} target="_blank" rel="noreferrer">
+                  <button className="btn-primary" type="button" onClick={() => void handleOpenInstaller()}>
                     下载安装包
-                  </a>
+                  </button>
                 )}
-                <a className="btn-secondary" href={updateInfo.releaseUrl} target="_blank" rel="noreferrer">
+                <button className="btn-secondary" type="button" onClick={() => void handleOpenRelease()}>
                   打开发布页
-                </a>
+                </button>
               </div>
             </div>
           )}
           {updateError && <p className="settings-msg error">{updateError}</p>}
+        </>
+      ),
+    },
+    {
+      id: "diagnostics",
+      title: "诊断与日志",
+      description: "复制安装版诊断信息，或打开本机日志目录。",
+      body: (
+        <>
+          <div className="settings-diagnostics-actions">
+            <button className="btn-secondary" type="button" onClick={() => void handleLoadDiagnostics()}>
+              读取诊断
+            </button>
+            <button className="btn-secondary" type="button" onClick={() => void handleCopyDiagnostics()}>
+              复制诊断
+            </button>
+            <button className="btn-secondary" type="button" onClick={() => void handleOpenLogDir()}>
+              打开日志目录
+            </button>
+          </div>
+          <p className="settings-hint">
+            诊断包含版本、资源目录、后端端口、健康检查、随包 Python 和关键日志状态；不包含 API Key。
+          </p>
+          {diagnosticsMessage && <p className={`settings-msg${diagnosticsMessage.includes("失败") ? " error" : ""}`}>{diagnosticsMessage}</p>}
+          {diagnostics && <pre className="settings-diagnostics">{diagnostics}</pre>}
+        </>
+      ),
+    },
+  ];
+
+  return (
+    <div className="settings-panel">
+      <header className="settings-header">
+        <h2>设置</h2>
+      </header>
+
+      <div className="settings-body">
+        <div className="settings-sections-grid">
+          {updateSections.map((section) => (
+            <section className="settings-card" key={section.id}>
+              <header className="settings-card-header">
+                <div>
+                  <h3>{section.title}</h3>
+                  <p>{section.description}</p>
+                </div>
+              </header>
+              <div className="settings-card-body">{section.body}</div>
+            </section>
+          ))}
         </div>
+
+        {!readonly && (
+          <section className="settings-card settings-card--actions">
+            <header className="settings-card-header">
+              <div>
+                <h3>保存</h3>
+                <p>把当前预设和 Agent 行为写回本地配置。</p>
+              </div>
+            </header>
+            <div className="settings-card-body">
+              <div className="settings-actions">
+                <button className="btn-primary" onClick={handleSave} disabled={saving}>
+                  {saving ? "保存中…" : "保存设置"}
+                </button>
+                <button className="btn-secondary" onClick={handleReset} disabled={saving}>
+                  重置
+                </button>
+              </div>
+              {message && <p className={`settings-msg${isError ? " error" : ""}`}>{message}</p>}
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );

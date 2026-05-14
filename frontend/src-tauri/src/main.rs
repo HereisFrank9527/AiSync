@@ -29,6 +29,75 @@ struct BackendProcess {
     shutdown_requested: AtomicBool,
 }
 
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::process::Command;
+        Command::new("explorer.exe")
+            .arg(url)
+            .spawn()
+            .map_err(|error| format!("failed to open url: {error}"))?;
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        Command::new("open")
+            .arg(url)
+            .spawn()
+            .map_err(|error| format!("failed to open url: {error}"))?;
+        return Ok(());
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        use std::process::Command;
+        Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map_err(|error| format!("failed to open url: {error}"))?;
+        return Ok(());
+    }
+    #[allow(unreachable_code)]
+    Err("opening external URLs is not supported on this platform".to_string())
+}
+
+#[tauri::command]
+fn open_log_dir(app: AppHandle) -> Result<(), String> {
+    let log_dir = app
+        .path()
+        .app_log_dir()
+        .map_err(|error| format!("failed to resolve log dir: {error}"))?;
+    create_dir_all(&log_dir).map_err(|error| format!("failed to create log dir: {error}"))?;
+    let path = log_dir.to_string_lossy().to_string();
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer.exe")
+            .arg(path)
+            .spawn()
+            .map_err(|error| format!("failed to open log dir: {error}"))?;
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()
+            .map_err(|error| format!("failed to open log dir: {error}"))?;
+        return Ok(());
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map_err(|error| format!("failed to open log dir: {error}"))?;
+        return Ok(());
+    }
+    #[allow(unreachable_code)]
+    Err("opening log directories is not supported on this platform".to_string())
+}
+
 fn app_version(_: &AppHandle) -> String {
     env!("AISYNC_APP_VERSION").to_string()
 }
@@ -829,7 +898,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             backend_api_base,
             backend_diagnostics,
-            frontend_diagnostics
+            frontend_diagnostics,
+            open_external_url,
+            open_log_dir
         ])
         .plugin(tauri_plugin_dialog::init())
         .run(tauri::generate_context!())

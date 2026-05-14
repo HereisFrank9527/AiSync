@@ -73,6 +73,7 @@ operation.log
 *.sqlite3
 *.db
 *.local.md
+项目.local.md
 
 # ===== Vector DB =====
 .vectordb/
