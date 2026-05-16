@@ -1,6 +1,6 @@
 /* ── 视图类型 ── */
 
-export type ViewId = "overview" | "chat" | "chapters" | "outline" | "characters" | "worldview" | "vector" | "tools" | "settings" | "files";
+export type ViewId = "overview" | "chat" | "chapters" | "outline" | "foreshadows" | "characters" | "worldview" | "vector" | "tools" | "settings" | "files";
 
 export interface ProjectInfo {
   name: string;
@@ -18,6 +18,11 @@ export interface AgentEvent {
     summary?: boolean;
     recent_messages?: number;
     summary_pending?: boolean;
+    summary_updated_at?: string | null;
+    summary_chars?: number;
+    recent_window?: number;
+    old_message_count?: number;
+    total_message_count?: number;
     summary_quality?: {
       score?: number;
       status?: string;
@@ -32,6 +37,31 @@ export interface AgentEvent {
   };
   sender?: "user" | "agent";
   conversation_id?: string;
+  run?: AgentRunRecord;
+}
+
+export type AgentRunStatus = "running" | "completed" | "failed" | "interrupted";
+
+export interface AgentRunRecord {
+  run_id: string;
+  conversation_id: string;
+  status: AgentRunStatus;
+  phase: string;
+  phase_label: string;
+  started_at: string;
+  updated_at: string;
+  finished_at: string | null;
+  preset_id: string | null;
+  enabled_tools: string[] | null;
+  input_preview: string;
+  error: string | null;
+  tool_calls: Array<{
+    name?: string;
+    status?: string;
+    duration_ms?: number | null;
+    error?: string | null;
+    at?: string;
+  }>;
 }
 
 /* ── 对话历史 ── */
@@ -70,9 +100,11 @@ export interface ConversationSummary {
 /* ── 故事对象 ── */
 
 export interface OutlineItem {
+  id?: string;
   index?: number;
   title?: string;
   summary?: string;
+  status?: string;
   raw?: string;
   [key: string]: unknown;
 }
@@ -122,6 +154,7 @@ export interface StoryChapter {
   status: string;
   target_characters: number;
   revision: number;
+  outline_id: string;
 }
 
 export interface StoryChapterMetadataUpdate {
@@ -129,12 +162,37 @@ export interface StoryChapterMetadataUpdate {
   summary: string;
   target_characters: number;
   revision: number;
+  outline_id: string;
 }
 
 export interface StoryChapters {
   source: string;
   items: StoryChapter[];
   total_characters: number;
+}
+
+export interface ForeshadowItem {
+  id: string;
+  title: string;
+  summary: string;
+  status: string;
+  importance: string;
+  plant_chapter: string;
+  payoff_chapter: string;
+  outline_ids: string[];
+  related_files: string[];
+  tags: string[];
+  notes: string;
+}
+
+export interface StoryForeshadows {
+  source: string;
+  items: ForeshadowItem[];
+  stats: {
+    total: number;
+    paid_off: number;
+    open: number;
+  };
 }
 
 export interface ProjectOverviewChapter {
@@ -149,8 +207,13 @@ export interface ProjectOverviewStats {
   characters: number;
   world_documents: number;
   outline_items: number;
+  completed_outline_items: number;
+  foreshadow_items: number;
+  paid_off_foreshadow_items: number;
   chapter_progress: number;
   character_progress: number;
+  outline_progress: number;
+  foreshadow_progress: number;
 }
 
 export interface ProjectOverview {

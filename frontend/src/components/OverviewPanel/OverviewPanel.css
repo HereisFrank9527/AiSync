@@ -83,7 +83,7 @@
 
 .overview-stats {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(7, 1fr);
   gap: var(--space-sm);
 }
 
@@ -108,7 +108,7 @@
 
 .overview-progress-panel {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-sm);
 }
 
@@ -224,6 +224,10 @@
 
   .overview-stats {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .overview-progress-panel {
+    grid-template-columns: 1fr;
   }
 }
 

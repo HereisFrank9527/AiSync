@@ -7,6 +7,7 @@ from typing import Any
 
 from app.llm.types import ChatRequest, LLMClient, TextDeltaCallback
 from app.projects.context import ProjectContext
+from app.projects.foreshadows import foreshadow_context_for_prompt
 from app.tools.base import ToolResult
 from app.tools.registry import ToolRegistry
 from app.vector.store import NullVectorStore
@@ -31,6 +32,7 @@ TASK_PLAN_DEFAULT = [
 ]
 TASK_PLAN_WRITING = [
     "检索相关设定",
+    "梳理相关伏笔",
     "梳理章节目标",
     "调用写作工具",
     "整理写作结果",
@@ -151,9 +153,12 @@ class MasterAgent:
             await self._push_task_list(task_plan, 0, "retrieving")
             await self._push_agent_status("正在检索项目上下文", "retrieving")
             relevant_context = await self.vector_store.query(user_input)
+            await self._push_agent_status("正在梳理相关伏笔", "retrieving_foreshadows")
+            foreshadow_context = await self._foreshadow_context(user_input, task_plan)
             messages = self._build_initial_messages(
                 user_input,
                 relevant_context,
+                foreshadow_context,
                 history or [],
                 memory_summary or "",
             )
@@ -199,7 +204,7 @@ class MasterAgent:
                 try:
                     response = await self.llm.chat(
                         ChatRequest(
-                            messages=messages,
+                            messages=self._compact_messages_for_llm(messages),
                             tools=self.tools.get_schemas(effective_tools),
                             system=self.system_prompt,
                             stream=True,
@@ -249,6 +254,8 @@ class MasterAgent:
                     {"iteration": iterations, "tool_calls": len(response.tool_calls)},
                 )
                 assistant_blocks: list[dict[str, Any]] = []
+                if response.reasoning_content:
+                    assistant_blocks.append({"type": "reasoning", "reasoning_content": response.reasoning_content})
                 if response.text:
                     assistant_blocks.append({"type": "text", "text": response.text})
                 for call in response.tool_calls:
@@ -301,20 +308,30 @@ class MasterAgent:
         self,
         user_input: str,
         relevant_context: list[dict],
+        foreshadow_context: str,
         history: list[dict[str, str]],
         memory_summary: str,
     ) -> list[dict[str, Any]]:
         memory_messages = self._conversation_memory_messages(history)
         summary_message = self._summary_memory_message(memory_summary)
-        current_content = user_input
+        context_blocks: list[str] = []
         if relevant_context:
-            current_content = (
-                "相关项目上下文：\n"
-                f"{self._compact_context(relevant_context)}\n\n"
-                "用户请求：\n"
-                f"{user_input}"
+            context_blocks.append(f"相关项目上下文：\n{self._compact_context(relevant_context)}")
+        if foreshadow_context:
+            context_blocks.append(
+                "相关伏笔上下文：\n"
+                f"{foreshadow_context}\n\n"
+                "写作时请根据伏笔状态决定：计划埋的伏笔可以铺垫；已埋下/推进中的伏笔可以推进；"
+                "标记为本章回收的伏笔应优先考虑回收；废弃伏笔不要主动使用。"
             )
+        joined_context = "\n\n".join(context_blocks)
+        current_content = f"{joined_context}\n\n用户请求：\n{user_input}" if joined_context else user_input
         return [*summary_message, *memory_messages, {"role": "user", "content": current_content}]
+
+    async def _foreshadow_context(self, user_input: str, task_plan: list[str]) -> str:
+        if task_plan != TASK_PLAN_WRITING and not any(keyword in user_input for keyword in ["伏笔", "回收", "埋设"]):
+            return ""
+        return await foreshadow_context_for_prompt(self.project, user_input)
 
     def _summary_memory_message(self, memory_summary: str) -> list[dict[str, Any]]:
         summary = memory_summary.strip()
@@ -353,6 +370,33 @@ class MasterAgent:
             total += length
             selected.append(item)
         return list(reversed(selected))
+
+    def _compact_messages_for_llm(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        compacted: list[dict[str, Any]] = []
+        for message in messages:
+            role = message.get("role")
+            content = message.get("content")
+            if role not in {"user", "assistant"}:
+                continue
+            if isinstance(content, str):
+                if content.strip():
+                    compacted.append(message)
+                continue
+            if isinstance(content, list):
+                filtered_blocks: list[dict[str, Any]] = []
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    block_type = block.get("type")
+                    if block_type == "text" and not str(block.get("text") or "").strip():
+                        continue
+                    if block_type == "reasoning" and not str(block.get("reasoning_content") or "").strip():
+                        continue
+                    if block_type in {"text", "reasoning", "tool_use", "tool_result"}:
+                        filtered_blocks.append(block)
+                if filtered_blocks:
+                    compacted.append({**message, "content": filtered_blocks})
+        return compacted
 
     def _compact_context(self, relevant_context: list[dict]) -> str:
         lines: list[str] = []

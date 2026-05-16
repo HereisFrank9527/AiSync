@@ -30,6 +30,24 @@ class ProjectContext:
             await asyncio.to_thread(path.parent.mkdir, parents=True, exist_ok=True)
             await asyncio.to_thread(path.write_text, content, encoding="utf-8")
 
+    async def move_file(self, source: str | Path, target: str | Path) -> None:
+        source_path = self.resolve_path(source)
+        target_path = self.resolve_path(target)
+        async with self._lock:
+            if not await asyncio.to_thread(source_path.is_file):
+                raise FileNotFoundError(str(source))
+            if await asyncio.to_thread(target_path.exists):
+                raise FileExistsError(str(target))
+            await asyncio.to_thread(target_path.parent.mkdir, parents=True, exist_ok=True)
+            await asyncio.to_thread(source_path.rename, target_path)
+
+    async def delete_file(self, relative_path: str | Path) -> None:
+        path = self.resolve_path(relative_path)
+        async with self._lock:
+            if not await asyncio.to_thread(path.is_file):
+                raise FileNotFoundError(str(relative_path))
+            await asyncio.to_thread(path.unlink)
+
     async def read_json(self, relative_path: str | Path) -> Any:
         return json.loads(await self.read_text(relative_path))
 

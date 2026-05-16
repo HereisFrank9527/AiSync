@@ -182,6 +182,14 @@ export default function OverviewPanel({
                 <span>大纲节点</span>
                 <strong>{formatNumber(stats.outline_items)}</strong>
               </div>
+              <div>
+                <span>完成大纲</span>
+                <strong>{formatNumber(stats.completed_outline_items)}</strong>
+              </div>
+              <div>
+                <span>已回收伏笔</span>
+                <strong>{formatNumber(stats.paid_off_foreshadow_items)} / {formatNumber(stats.foreshadow_items)}</strong>
+              </div>
             </section>
           )}
 
@@ -203,6 +211,24 @@ export default function OverviewPanel({
                 </header>
                 <div className="overview-progress-track">
                   <span style={{ width: percent(stats.character_progress) }} />
+                </div>
+              </div>
+              <div>
+                <header>
+                  <span>大纲完成度</span>
+                  <strong>{formatNumber(stats.completed_outline_items)} / {formatNumber(stats.outline_items)}</strong>
+                </header>
+                <div className="overview-progress-track">
+                  <span style={{ width: percent(stats.outline_progress) }} />
+                </div>
+              </div>
+              <div>
+                <header>
+                  <span>伏笔回收度</span>
+                  <strong>{formatNumber(stats.paid_off_foreshadow_items)} / {formatNumber(stats.foreshadow_items)}</strong>
+                </header>
+                <div className="overview-progress-track">
+                  <span style={{ width: percent(stats.foreshadow_progress) }} />
                 </div>
               </div>
             </section>

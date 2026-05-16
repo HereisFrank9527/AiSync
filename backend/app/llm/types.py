@@ -17,6 +17,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     content: list[Any]
     text: str
+    reasoning_content: str = ""
     tool_calls: list[Any] = Field(default_factory=list)
     stop_reason: str | None = None
     raw: Any = None

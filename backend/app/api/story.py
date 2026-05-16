@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -13,9 +14,11 @@ router = APIRouter(prefix="/story", tags=["story"])
 
 
 class OutlineItem(BaseModel):
+    id: str | None = None
     index: int | None = None
     title: str = ""
     summary: str = ""
+    status: str = "planned"
 
 
 class OutlineSaveRequest(BaseModel):
@@ -28,6 +31,17 @@ class WorldviewDocumentSaveRequest(BaseModel):
     project_path: str | None = None
     path: str
     content: str
+
+
+class WorldviewDocumentRenameRequest(BaseModel):
+    project_path: str | None = None
+    old_path: str
+    new_path: str
+
+
+class WorldviewDocumentDeleteRequest(BaseModel):
+    project_path: str | None = None
+    path: str
 
 
 class ChapterSaveRequest(BaseModel):
@@ -43,6 +57,31 @@ class ChapterMetadataSaveRequest(BaseModel):
     summary: str = ""
     target_characters: int = 0
     revision: int = 0
+    outline_id: str = ""
+
+
+class ForeshadowItem(BaseModel):
+    id: str | None = None
+    title: str = ""
+    summary: str = ""
+    status: str = "planned"
+    importance: str = "medium"
+    plant_chapter: str = ""
+    payoff_chapter: str = ""
+    outline_ids: list[str] = Field(default_factory=list)
+    related_files: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    notes: str = ""
+
+
+class ForeshadowSaveRequest(BaseModel):
+    project_path: str | None = None
+    items: list[ForeshadowItem] = Field(default_factory=list)
+
+
+OUTLINE_STATUSES = {"planned", "draft", "revising", "done"}
+FORESHADOW_STATUSES = {"planned", "planted", "developing", "paid_off", "abandoned"}
+FORESHADOW_IMPORTANCE = {"minor", "medium", "major"}
 
 
 def project_context(project_path: str | None) -> ProjectContext:
@@ -58,10 +97,107 @@ def outline_to_markdown(title: str, items: list[OutlineItem]) -> str:
         heading = item.title.strip() or f"节点 {index}"
         lines.append(f"## 第 {index} 章：{heading}")
         summary = item.summary.strip()
+        if item.status and item.status != "planned":
+            lines.extend(["", f"> 状态：{item.status}"])
         if summary:
             lines.extend(["", summary])
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def safe_outline_id(value: str, position: int) -> str:
+    normalized = "".join(char if char.isalnum() or char in "-_" else "-" for char in value.strip())
+    normalized = "-".join(part for part in normalized.split("-") if part)
+    return normalized[:80] or f"outline-{position}"
+
+
+def safe_item_id(prefix: str, value: str, position: int) -> str:
+    normalized = "".join(char if char.isalnum() or char in "-_" else "-" for char in value.strip())
+    normalized = "-".join(part for part in normalized.split("-") if part)
+    return normalized[:80] or f"{prefix}-{position}"
+
+
+def normalize_outline_status(value: Any) -> str:
+    status = str(value or "planned").strip()
+    return status if status in OUTLINE_STATUSES else "planned"
+
+
+def normalize_outline_items(items: list[OutlineItem]) -> list[dict[str, Any]]:
+    normalized_items: list[dict[str, Any]] = []
+    for position, item in enumerate(items, start=1):
+        title = item.title.strip()
+        summary = item.summary.strip()
+        if not title and not summary:
+            continue
+        normalized_items.append({
+            "id": safe_outline_id(item.id or f"outline-{position}", position),
+            "index": position,
+            "title": title or f"节点 {position}",
+            "summary": summary,
+            "status": normalize_outline_status(item.status),
+        })
+    return normalized_items
+
+
+def normalize_string_list(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        normalized.append(text)
+        seen.add(text)
+    return normalized
+
+
+def normalize_worldview_path(path: str) -> str:
+    normalized = PurePosixPath(path.strip().replace("\\", "/")).as_posix()
+    parts = PurePosixPath(normalized).parts
+    if (
+        not normalized.startswith("world/")
+        or not normalized.endswith(".md")
+        or ".." in parts
+        or len(parts) < 2
+    ):
+        raise HTTPException(status_code=400, detail="path must be a markdown file under world/")
+    return normalized
+
+
+def normalize_foreshadow_status(value: Any) -> str:
+    status = str(value or "planned").strip()
+    return status if status in FORESHADOW_STATUSES else "planned"
+
+
+def normalize_foreshadow_importance(value: Any) -> str:
+    importance = str(value or "medium").strip()
+    return importance if importance in FORESHADOW_IMPORTANCE else "medium"
+
+
+def normalize_foreshadow_items(items: list[ForeshadowItem]) -> list[dict[str, Any]]:
+    normalized_items: list[dict[str, Any]] = []
+    for position, item in enumerate(items, start=1):
+        title = item.title.strip()
+        summary = item.summary.strip()
+        notes = item.notes.strip()
+        if not title and not summary and not notes:
+            continue
+        normalized_items.append({
+            "id": safe_item_id("foreshadow", item.id or f"foreshadow-{position}", position),
+            "title": title or f"伏笔 {position}",
+            "summary": summary,
+            "status": normalize_foreshadow_status(item.status),
+            "importance": normalize_foreshadow_importance(item.importance),
+            "plant_chapter": item.plant_chapter.strip(),
+            "payoff_chapter": item.payoff_chapter.strip(),
+            "outline_ids": normalize_string_list(item.outline_ids),
+            "related_files": normalize_string_list(item.related_files),
+            "tags": normalize_string_list(item.tags),
+            "notes": notes,
+        })
+    return normalized_items
 
 
 def title_from_markdown(path: str, content: str) -> str:
@@ -123,6 +259,7 @@ def normalize_chapter_metadata(metadata: dict[str, Any], fallback_summary: str) 
         "summary": str(metadata.get("summary") or fallback_summary),
         "target_characters": int_value(metadata.get("target_characters")),
         "revision": int_value(metadata.get("revision")),
+        "outline_id": str(metadata.get("outline_id") or ""),
     }
 
 
@@ -184,17 +321,7 @@ async def get_outline(project_path: str = Query(...)) -> dict[str, Any]:
 @router.put("/outline")
 async def save_outline(request: OutlineSaveRequest) -> dict[str, Any]:
     context = project_context(request.project_path)
-    normalized_items: list[dict[str, Any]] = []
-    for position, item in enumerate(request.items, start=1):
-        title = item.title.strip()
-        summary = item.summary.strip()
-        if not title and not summary:
-            continue
-        normalized_items.append({
-            "index": item.index or position,
-            "title": title or f"节点 {position}",
-            "summary": summary,
-        })
+    normalized_items = normalize_outline_items(request.items)
 
     data = {
         "title": request.title.strip() or "大纲",
@@ -278,9 +405,7 @@ async def get_worldview(project_path: str = Query(...)) -> dict[str, Any]:
 @router.put("/worldview/document")
 async def save_worldview_document(request: WorldviewDocumentSaveRequest) -> dict[str, Any]:
     context = project_context(request.project_path)
-    path = request.path.strip().replace("\\", "/")
-    if not path.startswith("world/") or not path.endswith(".md") or ".." in path:
-        raise HTTPException(status_code=400, detail="path must be a markdown file under world/")
+    path = normalize_worldview_path(request.path)
 
     await context.write_text(path, request.content)
     return {
@@ -288,6 +413,41 @@ async def save_worldview_document(request: WorldviewDocumentSaveRequest) -> dict
         "title": title_from_markdown(path, request.content),
         "content": request.content,
     }
+
+
+@router.post("/worldview/document/rename")
+async def rename_worldview_document(request: WorldviewDocumentRenameRequest) -> dict[str, Any]:
+    context = project_context(request.project_path)
+    old_path = normalize_worldview_path(request.old_path)
+    new_path = normalize_worldview_path(request.new_path)
+    if old_path == new_path:
+        raise HTTPException(status_code=400, detail="new_path must be different from old_path")
+
+    try:
+        await context.move_file(old_path, new_path)
+        content = await context.read_text(new_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="source worldview document not found") from exc
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail="target worldview document already exists") from exc
+
+    return {
+        "old_path": old_path,
+        "path": new_path,
+        "title": title_from_markdown(new_path, content),
+        "content": content,
+    }
+
+
+@router.post("/worldview/document/delete")
+async def delete_worldview_document(request: WorldviewDocumentDeleteRequest) -> dict[str, str]:
+    context = project_context(request.project_path)
+    path = normalize_worldview_path(request.path)
+    try:
+        await context.delete_file(path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="worldview document not found") from exc
+    return {"path": path, "status": "deleted"}
 
 
 @router.get("/chapters")
@@ -318,6 +478,7 @@ async def get_chapters(project_path: str = Query(...)) -> dict[str, Any]:
             "status": metadata["status"],
             "target_characters": metadata["target_characters"],
             "revision": metadata["revision"],
+            "outline_id": metadata["outline_id"],
         })
 
     chapters.sort(key=lambda item: item["path"])
@@ -325,6 +486,52 @@ async def get_chapters(project_path: str = Query(...)) -> dict[str, Any]:
         "source": "chapters",
         "items": chapters,
         "total_characters": sum(int(item["characters"]) for item in chapters),
+    }
+
+
+@router.get("/foreshadows")
+async def get_foreshadows(project_path: str = Query(...)) -> dict[str, Any]:
+    context = project_context(project_path)
+    path = "plot/foreshadows.json"
+    if not await context.exists(path):
+        return {"source": path, "items": [], "stats": {"total": 0, "paid_off": 0, "open": 0}}
+    try:
+        data = await context.read_json(path)
+    except Exception:
+        return {"source": path, "items": [], "stats": {"total": 0, "paid_off": 0, "open": 0}}
+
+    raw_items = data.get("items") if isinstance(data, dict) else data
+    if not isinstance(raw_items, list):
+        raw_items = []
+    items = normalize_foreshadow_items([ForeshadowItem.model_validate(item) for item in raw_items if isinstance(item, dict)])
+    paid_off = sum(1 for item in items if item["status"] == "paid_off")
+    return {
+        "source": path,
+        "items": items,
+        "stats": {
+            "total": len(items),
+            "paid_off": paid_off,
+            "open": len(items) - paid_off,
+        },
+    }
+
+
+@router.put("/foreshadows")
+async def save_foreshadows(request: ForeshadowSaveRequest) -> dict[str, Any]:
+    context = project_context(request.project_path)
+    path = "plot/foreshadows.json"
+    items = normalize_foreshadow_items(request.items)
+    data = {"items": items}
+    await context.write_json(path, data)
+    paid_off = sum(1 for item in items if item["status"] == "paid_off")
+    return {
+        "source": path,
+        "items": items,
+        "stats": {
+            "total": len(items),
+            "paid_off": paid_off,
+            "open": len(items) - paid_off,
+        },
     }
 
 
@@ -358,6 +565,7 @@ async def save_chapter_metadata(request: ChapterMetadataSaveRequest) -> dict[str
             "summary": request.summary.strip(),
             "target_characters": request.target_characters,
             "revision": request.revision,
+            "outline_id": request.outline_id.strip(),
         },
         "",
     )

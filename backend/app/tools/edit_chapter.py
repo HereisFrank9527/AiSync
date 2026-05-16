@@ -11,7 +11,10 @@ class EditChapterTool(BaseTool):
     description = "编辑已有章节 Markdown 文件。"
 
     def file_access(self) -> ToolFileAccess:
-        return ToolFileAccess(read=["chapters/**/*.md"], write=["chapters/**/*.md"])
+        return ToolFileAccess(
+            read=["chapters/**/*.md", "plot/foreshadows.json", "plot/outline.json", "chapters/**/ch-meta.yaml"],
+            write=["chapters/**/*.md"],
+        )
 
     def presentation(self) -> ToolPresentation:
         return ToolPresentation(type="stream:editor", description="章节编辑器预览")
@@ -32,6 +35,19 @@ class EditChapterTool(BaseTool):
             "required": ["path", "content"],
             "additionalProperties": False,
         }
+
+    def build_prompt(self, params: dict[str, Any]) -> str:
+        path = str(params.get("path") or "")
+        mode = str(params.get("mode") or "replace")
+        content = str(params.get("content") or "").strip()
+        return (
+            "请根据当前项目设定编辑章节，并调用 `edit_chapter` 工具写回章节文件。\n"
+            f"目标章节路径：{path or '请从用户要求判断'}\n"
+            f"应用方式：{mode}\n"
+            f"编辑要求或草稿：{content or '按当前章节内容、项目上下文和用户要求修改。'}\n"
+            "请检查 plot/foreshadows.json：如果目标章节是某个伏笔的埋设/回收章节，或关联同一大纲节点，"
+            "修改时应保持伏笔状态一致；不要主动使用已废弃伏笔。"
+        )
 
     async def execute(self, params: dict[str, Any], context: ProjectContext) -> ToolResult:
         path = str(params["path"])

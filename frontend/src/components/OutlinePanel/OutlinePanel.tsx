@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import type { OutlineItem, StoryOutline, ToolDescriptor } from "../../types";
+import type { OutlineItem, StoryChapters, StoryOutline, ToolDescriptor } from "../../types";
 import MarkdownView from "../MarkdownView";
 import "./OutlinePanel.css";
 
 interface OutlinePanelProps {
   outline: StoryOutline | null;
+  chapters: StoryChapters | null;
   loading: boolean;
   error: string;
   tools: ToolDescriptor[];
@@ -13,8 +14,24 @@ interface OutlinePanelProps {
   onOpenTool: (tool: ToolDescriptor) => void;
 }
 
+const STATUS_OPTIONS = [
+  { value: "planned", label: "未开始" },
+  { value: "draft", label: "草稿" },
+  { value: "revising", label: "修订" },
+  { value: "done", label: "完成" },
+];
+
+function outlineId(item: OutlineItem, index: number) {
+  return String(item.id || `outline-${index + 1}`);
+}
+
+function statusLabel(status: unknown) {
+  return STATUS_OPTIONS.find((option) => option.value === status)?.label ?? "未开始";
+}
+
 export default function OutlinePanel({
   outline,
+  chapters,
   loading,
   error,
   tools,
@@ -28,18 +45,31 @@ export default function OutlinePanel({
   const [draftItems, setDraftItems] = useState<OutlineItem[]>([]);
   const [editing, setEditing] = useState(false);
   const [query, setQuery] = useState("");
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
 
   useEffect(() => {
     setTitle(outline?.title || "大纲");
     setDraftItems(sourceItems.map((item, index) => ({
+      id: outlineId(item, index),
       index: Number(item.index ?? index + 1),
       title: String(item.title || item.raw || `节点 ${index + 1}`),
       summary: String(item.summary || ""),
+      status: String(item.status || "planned"),
     })));
     setEditing(false);
   }, [outline?.title, sourceItems]);
 
   const items = editing ? draftItems : sourceItems;
+  const linkedChapters = useMemo(() => {
+    const groups = new Map<string, NonNullable<StoryChapters["items"]>>();
+    for (const chapter of chapters?.items ?? []) {
+      if (!chapter.outline_id) continue;
+      const current = groups.get(chapter.outline_id) ?? [];
+      current.push(chapter);
+      groups.set(chapter.outline_id, current);
+    }
+    return groups;
+  }, [chapters?.items]);
   const normalizedQuery = query.trim().toLowerCase();
   const visibleItems = normalizedQuery
     ? items.filter((item) => {
@@ -56,7 +86,13 @@ export default function OutlinePanel({
     setEditing(true);
     setDraftItems((current) => [
       ...current,
-      { index: current.length + 1, title: `节点 ${current.length + 1}`, summary: "" },
+      {
+        id: `outline-${Date.now().toString(36)}`,
+        index: current.length + 1,
+        title: `节点 ${current.length + 1}`,
+        summary: "",
+        status: "planned",
+      },
     ]);
   };
 
@@ -74,8 +110,35 @@ export default function OutlinePanel({
     });
   };
 
+  const reorderItem = (from: number, to: number) => {
+    if (from === to) return;
+    setDraftItems((current) => {
+      if (from < 0 || from >= current.length || to < 0 || to >= current.length) return current;
+      const next = [...current];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next.map((item, i) => ({ ...item, index: i + 1 }));
+    });
+  };
+
   const handleSave = async () => {
-    await onSave(title, draftItems.map((item, index) => ({ ...item, index: index + 1 })));
+    await onSave(title, draftItems.map((item, index) => ({
+      ...item,
+      id: item.id || `outline-${index + 1}`,
+      index: index + 1,
+      status: String(item.status || "planned"),
+    })));
+    setEditing(false);
+  };
+
+  const resetDraft = () => {
+    setDraftItems(sourceItems.map((item, index) => ({
+      id: outlineId(item, index),
+      index: Number(item.index ?? index + 1),
+      title: String(item.title || item.raw || `节点 ${index + 1}`),
+      summary: String(item.summary || ""),
+      status: String(item.status || "planned"),
+    })));
     setEditing(false);
   };
 
@@ -98,14 +161,7 @@ export default function OutlinePanel({
           <button className="btn-secondary" onClick={onRefresh}>刷新</button>
           {editing ? (
             <>
-              <button className="btn-secondary" onClick={() => {
-                setDraftItems(sourceItems.map((item, index) => ({
-                  index: Number(item.index ?? index + 1),
-                  title: String(item.title || item.raw || `节点 ${index + 1}`),
-                  summary: String(item.summary || ""),
-                })));
-                setEditing(false);
-              }}>取消</button>
+              <button className="btn-secondary" onClick={resetDraft}>取消</button>
               <button className="btn-primary" onClick={() => void handleSave()}>保存</button>
             </>
           ) : (
@@ -138,16 +194,41 @@ export default function OutlinePanel({
           {visibleItems.map((item, visibleIndex) => {
             const itemIndex = items.indexOf(item);
             const index = itemIndex === -1 ? visibleIndex : itemIndex;
+            const id = outlineId(item, index);
+            const linked = linkedChapters.get(id) ?? [];
             return (
-            <article className="outline-item" key={`${item.index ?? index}-${item.title ?? item.raw ?? index}`}>
+            <article
+              className={`outline-item${editing && dragIndex === index ? " dragging" : ""}`}
+              key={id}
+              draggable={editing}
+              onDragStart={() => setDragIndex(index)}
+              onDragOver={(event) => editing && event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                if (dragIndex === null) return;
+                reorderItem(dragIndex, index);
+                setDragIndex(null);
+              }}
+              onDragEnd={() => setDragIndex(null)}
+            >
               <div className="outline-item-index">{index + 1}</div>
               <div>
                 {editing ? (
                   <div className="outline-item-edit">
-                    <input
-                      value={String(item.title || "")}
-                      onChange={(event) => updateItem(index, { title: event.target.value })}
-                    />
+                    <div className="outline-item-edit-row">
+                      <input
+                        value={String(item.title || "")}
+                        onChange={(event) => updateItem(index, { title: event.target.value })}
+                      />
+                      <select
+                        value={String(item.status || "planned")}
+                        onChange={(event) => updateItem(index, { status: event.target.value })}
+                      >
+                        {STATUS_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </div>
                     <textarea
                       rows={5}
                       value={String(item.summary || "")}
@@ -161,7 +242,19 @@ export default function OutlinePanel({
                   </div>
                 ) : (
                   <>
-                    <h3>{String(item.title || item.raw || `节点 ${index + 1}`)}</h3>
+                    <div className="outline-item-heading">
+                      <h3>{String(item.title || item.raw || `节点 ${index + 1}`)}</h3>
+                      <span className={`outline-status outline-status-${String(item.status || "planned")}`}>
+                        {statusLabel(item.status)}
+                      </span>
+                    </div>
+                    {linked.length > 0 && (
+                      <div className="outline-linked-chapters">
+                        {linked.map((chapter) => (
+                          <span key={chapter.path}>{chapter.title} · {chapter.status || "draft"}</span>
+                        ))}
+                      </div>
+                    )}
                     {item.summary && <MarkdownView content={String(item.summary)} />}
                   </>
                 )}

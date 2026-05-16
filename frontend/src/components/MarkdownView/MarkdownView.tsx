@@ -5,16 +5,35 @@ interface MarkdownViewProps {
   content: string;
 }
 
+interface ListItem {
+  content: string;
+  checked?: boolean;
+  children: ListBlock[];
+}
+
+interface ListBlock {
+  type: "list";
+  ordered: boolean;
+  start: number;
+  items: ListItem[];
+}
+
 type Block =
   | { type: "code"; language: string; content: string }
   | { type: "heading"; level: number; content: string }
   | { type: "quote"; content: string }
   | { type: "hr" }
   | { type: "table"; headers: string[]; rows: string[][] }
-  | { type: "task"; items: { checked: boolean; content: string }[] }
-  | { type: "ul"; items: string[] }
-  | { type: "ol"; items: string[] }
+  | ListBlock
   | { type: "paragraph"; content: string };
+
+interface ListMarker {
+  indent: number;
+  ordered: boolean;
+  start: number;
+  checked?: boolean;
+  content: string;
+}
 
 function isSafeHref(href: string) {
   return /^(https?:|mailto:|\/|#)/i.test(href);
@@ -119,8 +138,110 @@ function isHorizontalRule(line: string) {
   return /^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line);
 }
 
-function taskListMatch(line: string) {
-  return /^\s*[-*]\s+\[([ xX])\]\s+(.+)$/.exec(line);
+function indentWidth(value: string) {
+  let width = 0;
+  for (const char of value) {
+    if (char === " ") width += 1;
+    else if (char === "\t") width += 4;
+    else break;
+  }
+  return width;
+}
+
+function listMarkerMatch(line: string): ListMarker | null {
+  const match = /^(\s*)((\d+)[.)、]|[-*+])\s+(?:\[([ xX])\]\s+)?(.*)$/.exec(line);
+  if (!match) return null;
+  const start = match[3] ? Number(match[3]) : 1;
+  return {
+    indent: indentWidth(match[1] ?? ""),
+    ordered: Boolean(match[3]),
+    start: Number.isFinite(start) ? start : 1,
+    checked: match[4] ? match[4].toLowerCase() === "x" : undefined,
+    content: match[5] ?? "",
+  };
+}
+
+function nextNonBlankIndex(lines: string[], index: number) {
+  let next = index;
+  while (next < lines.length && !lines[next].trim()) next += 1;
+  return next;
+}
+
+function shouldAttachSameIndentChild(parent: ListItem, parentOrdered: boolean, marker: ListMarker) {
+  if (!parentOrdered || marker.ordered) return false;
+  return /[:：]\s*$/.test(parent.content);
+}
+
+function parseList(lines: string[], startIndex: number): { block: ListBlock; nextIndex: number } {
+  const first = listMarkerMatch(lines[startIndex]);
+  if (!first) {
+    return { block: { type: "list", ordered: false, start: 1, items: [] }, nextIndex: startIndex + 1 };
+  }
+
+  const listIndent = first.indent;
+  const ordered = first.ordered;
+  const block: ListBlock = { type: "list", ordered, start: first.start, items: [] };
+  let index = startIndex;
+
+  while (index < lines.length) {
+    const marker = listMarkerMatch(lines[index]);
+    if (!marker || marker.indent !== listIndent || marker.ordered !== ordered) break;
+
+    const item: ListItem = {
+      content: marker.content,
+      checked: marker.checked,
+      children: [],
+    };
+    block.items.push(item);
+    index += 1;
+
+    while (index < lines.length) {
+      const line = lines[index];
+      if (!line.trim()) {
+        const nextIndex = nextNonBlankIndex(lines, index);
+        const nextMarker = nextIndex < lines.length ? listMarkerMatch(lines[nextIndex]) : null;
+        if (nextMarker && nextMarker.indent >= listIndent) {
+          index += 1;
+          continue;
+        }
+        break;
+      }
+
+      const nextMarker = listMarkerMatch(line);
+      if (nextMarker) {
+        if (nextMarker.indent > listIndent) {
+          const child = parseList(lines, index);
+          item.children.push(child.block);
+          index = child.nextIndex;
+          continue;
+        }
+
+        if (
+          nextMarker.indent === listIndent &&
+          nextMarker.ordered !== ordered &&
+          shouldAttachSameIndentChild(item, ordered, nextMarker)
+        ) {
+          const child = parseList(lines, index);
+          item.children.push(child.block);
+          index = child.nextIndex;
+          continue;
+        }
+
+        break;
+      }
+
+      const continuationIndent = indentWidth(line);
+      if (continuationIndent > listIndent) {
+        item.content = `${item.content}${item.content ? "\n" : ""}${line.trim()}`;
+        index += 1;
+        continue;
+      }
+
+      break;
+    }
+  }
+
+  return { block, nextIndex: index };
 }
 
 function parseBlocks(markdown: string): Block[] {
@@ -174,18 +295,6 @@ function parseBlocks(markdown: string): Block[] {
       continue;
     }
 
-    if (taskListMatch(line)) {
-      const items: { checked: boolean; content: string }[] = [];
-      while (index < lines.length) {
-        const item = taskListMatch(lines[index]);
-        if (!item) break;
-        items.push({ checked: item[1].toLowerCase() === "x", content: item[2] });
-        index += 1;
-      }
-      blocks.push({ type: "task", items });
-      continue;
-    }
-
     if (/^>\s?/.test(line)) {
       const quote: string[] = [];
       while (index < lines.length && /^>\s?/.test(lines[index])) {
@@ -196,23 +305,10 @@ function parseBlocks(markdown: string): Block[] {
       continue;
     }
 
-    if (/^\s*[-*]\s+/.test(line)) {
-      const items: string[] = [];
-      while (index < lines.length && /^\s*[-*]\s+/.test(lines[index])) {
-        items.push(lines[index].replace(/^\s*[-*]\s+/, ""));
-        index += 1;
-      }
-      blocks.push({ type: "ul", items });
-      continue;
-    }
-
-    if (/^\s*\d+\.\s+/.test(line)) {
-      const items: string[] = [];
-      while (index < lines.length && /^\s*\d+\.\s+/.test(lines[index])) {
-        items.push(lines[index].replace(/^\s*\d+\.\s+/, ""));
-        index += 1;
-      }
-      blocks.push({ type: "ol", items });
+    if (listMarkerMatch(line)) {
+      const result = parseList(lines, index);
+      blocks.push(result.block);
+      index = result.nextIndex;
       continue;
     }
 
@@ -224,10 +320,8 @@ function parseBlocks(markdown: string): Block[] {
       !/^(#{1,4})\s+/.test(lines[index]) &&
       !isHorizontalRule(lines[index]) &&
       !(isTableRow(lines[index]) && index + 1 < lines.length && isTableDivider(lines[index + 1])) &&
-      !taskListMatch(lines[index]) &&
       !/^>\s?/.test(lines[index]) &&
-      !/^\s*[-*]\s+/.test(lines[index]) &&
-      !/^\s*\d+\.\s+/.test(lines[index])
+      !listMarkerMatch(lines[index])
     ) {
       paragraph.push(lines[index]);
       index += 1;
@@ -235,7 +329,57 @@ function parseBlocks(markdown: string): Block[] {
     blocks.push({ type: "paragraph", content: paragraph.join("\n") });
   }
 
-  return blocks;
+  return normalizeListBlocks(blocks);
+}
+
+function normalizeListBlocks(blocks: Block[]): Block[] {
+  const normalized: Block[] = [];
+  for (const block of blocks) {
+    const previous = normalized[normalized.length - 1];
+    if (block.type === "list" && previous?.type === "list") {
+      const lastPreviousItem = previous.items[previous.items.length - 1];
+      if (!previous.ordered && !block.ordered) {
+        previous.items.push(...block.items);
+        continue;
+      }
+      if (previous.ordered && block.ordered) {
+        previous.items.push(...block.items);
+        continue;
+      }
+      if (previous.ordered && !block.ordered && lastPreviousItem && /[:：]\s*$/.test(lastPreviousItem.content)) {
+        lastPreviousItem.children.push(block);
+        continue;
+      }
+    }
+    normalized.push(block);
+  }
+  return normalized;
+}
+
+function renderList(block: ListBlock, key?: number | string): ReactNode {
+  const Tag = block.ordered ? "ol" : "ul";
+  const hasTasks = block.items.some((item) => typeof item.checked === "boolean");
+  return (
+    <Tag
+      key={key}
+      start={block.ordered && block.start !== 1 ? block.start : undefined}
+      className={hasTasks ? "markdown-view-task-list" : undefined}
+    >
+      {block.items.map((item, index) => (
+        <li key={index} className={item.checked ? "is-checked" : ""}>
+          {typeof item.checked === "boolean" ? (
+            <label>
+              <input type="checkbox" checked={item.checked} readOnly />
+              <span className="markdown-view-list-text">{renderInline(item.content)}</span>
+            </label>
+          ) : (
+            <span className="markdown-view-list-text">{renderInline(item.content)}</span>
+          )}
+          {item.children.map((child, childIndex) => renderList(child, childIndex))}
+        </li>
+      ))}
+    </Tag>
+  );
 }
 
 export default function MarkdownView({ content }: MarkdownViewProps) {
@@ -282,25 +426,8 @@ export default function MarkdownView({ content }: MarkdownViewProps) {
             </div>
           );
         }
-        if (block.type === "task") {
-          return (
-            <ul key={index} className="markdown-view-task-list">
-              {block.items.map((item, itemIndex) => (
-                <li key={itemIndex} className={item.checked ? "is-checked" : ""}>
-                  <label>
-                    <input type="checkbox" checked={item.checked} readOnly />
-                    <span>{renderInline(item.content)}</span>
-                  </label>
-                </li>
-              ))}
-            </ul>
-          );
-        }
-        if (block.type === "ul") {
-          return <ul key={index}>{block.items.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item)}</li>)}</ul>;
-        }
-        if (block.type === "ol") {
-          return <ol key={index}>{block.items.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item)}</li>)}</ol>;
+        if (block.type === "list") {
+          return renderList(block, index);
         }
         return <p key={index}>{renderInline(block.content)}</p>;
       })}

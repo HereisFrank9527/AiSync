@@ -30,24 +30,28 @@ class OpenAICompatibleLLMClient:
             messages = [{"role": "system", "content": system_text}, *messages]
 
         tools_param = [self._to_openai_tool(t) for t in request.tools] if request.tools else None
+        params = self._chat_params(messages, tools_param, request.max_tokens)
 
-        if request.stream and on_text_delta:
+        stream = request.stream and on_text_delta and not self._should_disable_streaming_for_reasoning_tools(request)
+        if stream and on_text_delta:
             response = await self.client.chat.completions.create(
-                model=self.settings.llm_model_name,
-                messages=messages,
-                tools=tools_param,
-                max_tokens=request.max_tokens,
+                **params,
                 stream=True,
             )
             chunks: list[Any] = []
             tool_call_buffers: dict[int, dict[str, Any]] = {}
             text_parts: list[str] = []
+            reasoning_parts: list[str] = []
             async for chunk in response:
                 chunks.append(chunk)
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if delta and delta.content:
                     text_parts.append(delta.content)
                     await on_text_delta(delta.content)
+                if delta:
+                    reasoning_delta = self._extract_reasoning_content(delta)
+                    if reasoning_delta:
+                        reasoning_parts.append(reasoning_delta)
                 if delta and delta.tool_calls:
                     for tc in delta.tool_calls:
                         idx = tc.index
@@ -70,19 +74,18 @@ class OpenAICompatibleLLMClient:
             return ChatResponse(
                 content=chunks,
                 text="".join(text_parts),
+                reasoning_content="".join(reasoning_parts),
                 tool_calls=normalized,
                 stop_reason=None,
                 raw=chunks,
             )
         else:
             response = await self.client.chat.completions.create(
-                model=self.settings.llm_model_name,
-                messages=messages,
-                tools=tools_param,
-                max_tokens=request.max_tokens,
+                **params,
                 stream=False,
             )
             message = response.choices[0].message
+            reasoning_content = self._extract_reasoning_content(message)
             normalized: list[dict[str, Any]] = []
             for tc in message.tool_calls or []:
                 args_str = tc.function.arguments or "{}"
@@ -94,6 +97,7 @@ class OpenAICompatibleLLMClient:
             return ChatResponse(
                 content=[message.model_dump()],
                 text=message.content or "",
+                reasoning_content=reasoning_content,
                 tool_calls=normalized,
                 stop_reason=response.choices[0].finish_reason,
                 raw=response,
@@ -113,11 +117,16 @@ class OpenAICompatibleLLMClient:
             if role == "assistant" and isinstance(content, list):
                 text_parts: list[str] = []
                 tc_list: list[dict[str, Any]] = []
+                reasoning_content = ""
                 for block in content:
                     btype = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
                     if btype == "text":
                         text_parts.append(
                             block.get("text", "") if isinstance(block, dict) else getattr(block, "text", "")
+                        )
+                    elif btype == "reasoning":
+                        reasoning_content = str(
+                            block.get("reasoning_content", "") if isinstance(block, dict) else getattr(block, "reasoning_content", "")
                         )
                     elif btype == "tool_use":
                         bid = block.get("id") if isinstance(block, dict) else getattr(block, "id", "")
@@ -129,6 +138,8 @@ class OpenAICompatibleLLMClient:
                             "function": {"name": bname, "arguments": json.dumps(binput, ensure_ascii=False)},
                         })
                 assistant_msg: dict[str, Any] = {"role": "assistant", "content": "\n".join(text_parts) or None}
+                if reasoning_content and self._should_replay_reasoning_content():
+                    assistant_msg["reasoning_content"] = reasoning_content
                 if tc_list:
                     assistant_msg["tool_calls"] = tc_list
                 converted.append(assistant_msg)
@@ -148,6 +159,69 @@ class OpenAICompatibleLLMClient:
             else:
                 converted.append(msg)
         return converted
+
+    def _chat_params(
+        self,
+        messages: list[dict[str, Any]],
+        tools_param: list[dict[str, Any]] | None,
+        max_tokens: int,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "model": self.settings.llm_model_name,
+            "messages": messages,
+            "max_tokens": max_tokens,
+        }
+        if tools_param:
+            params["tools"] = tools_param
+        if self._is_deepseek_thinking_model():
+            params["extra_body"] = {
+                "thinking": {"type": "enabled" if self.settings.llm_enable_thinking else "disabled"}
+            }
+            if self.settings.llm_enable_thinking:
+                params["reasoning_effort"] = self._deepseek_reasoning_effort()
+        return params
+
+    def _should_disable_streaming_for_reasoning_tools(self, request: ChatRequest) -> bool:
+        return bool(request.tools and self._should_replay_reasoning_content())
+
+    def _extract_reasoning_content(self, value: Any) -> str:
+        direct = getattr(value, "reasoning_content", None)
+        if direct:
+            return str(direct)
+        if isinstance(value, dict):
+            nested = value.get("reasoning_content")
+            return str(nested) if nested else ""
+        extra = getattr(value, "model_extra", None)
+        if isinstance(extra, dict) and extra.get("reasoning_content"):
+            return str(extra["reasoning_content"])
+        model_dump = getattr(value, "model_dump", None)
+        if callable(model_dump):
+            try:
+                data = model_dump()
+            except Exception:
+                data = {}
+            if isinstance(data, dict) and data.get("reasoning_content"):
+                return str(data["reasoning_content"])
+        return ""
+
+    def _is_deepseek_provider(self) -> bool:
+        marker = f"{self.settings.llm_api_base or ''} {self.settings.llm_model_name}".lower()
+        return "deepseek" in marker
+
+    def _is_legacy_deepseek_reasoner(self) -> bool:
+        return self.settings.llm_model_name.lower().strip() == "deepseek-reasoner"
+
+    def _is_deepseek_thinking_model(self) -> bool:
+        return self._is_deepseek_provider() and not self._is_legacy_deepseek_reasoner()
+
+    def _should_replay_reasoning_content(self) -> bool:
+        return self.settings.llm_enable_thinking and self._is_deepseek_thinking_model()
+
+    def _deepseek_reasoning_effort(self) -> str:
+        effort = self.settings.llm_effort
+        if effort in {"max", "xhigh"}:
+            return "max"
+        return "high"
 
     def _to_openai_tool(self, tool: dict[str, Any]) -> dict[str, Any]:
         return {

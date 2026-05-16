@@ -55,6 +55,7 @@ export default function SettingsPanel({
   const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState("");
   const [diagnosticsMessage, setDiagnosticsMessage] = useState("");
+  const [activeSectionId, setActiveSectionId] = useState("profile");
 
   useEffect(() => {
     if (!activePreset) return;
@@ -273,6 +274,7 @@ export default function SettingsPanel({
     }
   };
 
+  const canSaveSection = ["profile", "llm", "agent"].includes(activeSectionId);
   const updateSections = [
     {
       id: "profile",
@@ -428,8 +430,11 @@ export default function SettingsPanel({
           </div>
           <label className="settings-checkbox">
             <input type="checkbox" checked={llm.enable_thinking} onChange={(e) => patchLlm("enable_thinking", e.target.checked)} disabled={readonly} />
-            启用 Thinking
+            启用思考模式
           </label>
+          <p className="settings-hint">
+            DeepSeek V4 等支持 thinking 的模型会按此开关发送 enabled/disabled；如果工具调用中遇到 reasoning_content 400，可先关闭后保存再重试。
+          </p>
           <label className="settings-checkbox">
             <input type="checkbox" checked={llm.prompt_cache} onChange={(e) => patchLlm("prompt_cache", e.target.checked)} disabled={readonly} />
             Prompt Cache
@@ -556,6 +561,7 @@ export default function SettingsPanel({
       ),
     },
   ];
+  const activeSection = updateSections.find((section) => section.id === activeSectionId) ?? updateSections[0];
 
   return (
     <div className="settings-panel">
@@ -564,41 +570,46 @@ export default function SettingsPanel({
       </header>
 
       <div className="settings-body">
-        <div className="settings-sections-grid">
+        <aside className="settings-inner-nav" aria-label="设置分类">
           {updateSections.map((section) => (
-            <section className="settings-card" key={section.id}>
-              <header className="settings-card-header">
-                <div>
-                  <h3>{section.title}</h3>
-                  <p>{section.description}</p>
-                </div>
-              </header>
-              <div className="settings-card-body">{section.body}</div>
-            </section>
+            <button
+              key={section.id}
+              className={activeSection.id === section.id ? "active" : ""}
+              onClick={() => setActiveSectionId(section.id)}
+            >
+              <strong>{section.title}</strong>
+              <span>{section.description}</span>
+            </button>
           ))}
-        </div>
+        </aside>
 
-        {!readonly && (
-          <section className="settings-card settings-card--actions">
+        <main className="settings-page">
+          <section className="settings-card">
             <header className="settings-card-header">
               <div>
-                <h3>保存</h3>
-                <p>把当前预设和 Agent 行为写回本地配置。</p>
+                <h3>{activeSection.title}</h3>
+                <p>{activeSection.description}</p>
               </div>
             </header>
-            <div className="settings-card-body">
-              <div className="settings-actions">
-                <button className="btn-primary" onClick={handleSave} disabled={saving}>
+            <div className="settings-card-body">{activeSection.body}</div>
+          </section>
+
+          {!readonly && canSaveSection && (
+            <section className="settings-save-panel">
+              <div className="settings-card-body">
+                <div className="settings-actions">
+                  <button className="btn-primary" onClick={handleSave} disabled={saving}>
                   {saving ? "保存中…" : "保存设置"}
                 </button>
                 <button className="btn-secondary" onClick={handleReset} disabled={saving}>
                   重置
                 </button>
+                </div>
+                {message && <p className={`settings-msg${isError ? " error" : ""}`}>{message}</p>}
               </div>
-              {message && <p className={`settings-msg${isError ? " error" : ""}`}>{message}</p>}
-            </div>
-          </section>
-        )}
+            </section>
+          )}
+        </main>
       </div>
     </div>
   );

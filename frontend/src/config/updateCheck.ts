@@ -35,17 +35,34 @@ interface GitHubRelease {
   assets?: GitHubReleaseAsset[];
 }
 
-function normalizeVersion(value: string) {
-  return value.trim().replace(/^v/i, "");
+export function normalizeVersion(value: string) {
+  const trimmed = value.trim();
+  const match = trimmed.match(/(?:^|[^0-9A-Za-z])v?(\d+(?:\.\d+)+(?:[-+][0-9A-Za-z.-]+)?)/i)
+    ?? trimmed.match(/^v?(\d+(?:\.\d+)+(?:[-+][0-9A-Za-z.-]+)?)/i);
+  return (match?.[1] ?? trimmed.replace(/^v/i, "")).trim();
 }
 
-function compareVersions(a: string, b: string) {
-  const left = normalizeVersion(a).split(/[.-]/);
-  const right = normalizeVersion(b).split(/[.-]/);
+function parseVersion(value: string) {
+  const normalized = normalizeVersion(value);
+  const [withoutBuild] = normalized.split("+", 1);
+  const [core, prerelease = ""] = withoutBuild.split("-", 2);
+  const numbers = core.split(".").map((part) => Number(part));
+  return {
+    numbers: numbers.map((part) => Number.isFinite(part) ? part : 0),
+    prerelease: prerelease ? prerelease.split(".") : [],
+  };
+}
+
+function comparePrerelease(left: string[], right: string[]) {
+  if (!left.length && !right.length) return 0;
+  if (!left.length) return 1;
+  if (!right.length) return -1;
   const length = Math.max(left.length, right.length);
   for (let index = 0; index < length; index += 1) {
-    const rawLeft = left[index] ?? "0";
-    const rawRight = right[index] ?? "0";
+    const rawLeft = left[index];
+    const rawRight = right[index];
+    if (rawLeft === undefined) return -1;
+    if (rawRight === undefined) return 1;
     const numLeft = Number(rawLeft);
     const numRight = Number(rawRight);
     if (Number.isFinite(numLeft) && Number.isFinite(numRight)) {
@@ -56,6 +73,18 @@ function compareVersions(a: string, b: string) {
     if (textCompare !== 0) return textCompare;
   }
   return 0;
+}
+
+export function compareVersions(a: string, b: string) {
+  const left = parseVersion(a);
+  const right = parseVersion(b);
+  const length = Math.max(left.numbers.length, right.numbers.length);
+  for (let index = 0; index < length; index += 1) {
+    const numLeft = left.numbers[index] ?? 0;
+    const numRight = right.numbers[index] ?? 0;
+    if (numLeft !== numRight) return numLeft - numRight;
+  }
+  return comparePrerelease(left.prerelease, right.prerelease);
 }
 
 function classifyAsset(name: string): UpdateAsset["kind"] {

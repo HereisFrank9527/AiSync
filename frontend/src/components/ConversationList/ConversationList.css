@@ -4,13 +4,16 @@
   gap: var(--space-sm);
   width: 260px;
   min-width: 260px;
+  max-width: 260px;
+  min-height: 0;
   padding: var(--space-md);
   border-right: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .conversation-list-header {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -21,13 +24,17 @@
 }
 
 .conversation-items {
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .conversation-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-xs);
 }
 
@@ -36,6 +43,7 @@
 }
 
 .conversation-main {
+  min-width: 0;
   flex: 1;
   text-align: left;
   background: var(--color-bg);
@@ -45,6 +53,9 @@
 .conversation-main span,
 .conversation-main small {
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .conversation-main small {
@@ -88,6 +99,8 @@
 }
 
 .conversation-delete {
+  align-self: center;
+  padding: 4px 8px;
   background: transparent;
   color: var(--color-danger);
 }

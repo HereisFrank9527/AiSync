@@ -93,6 +93,18 @@
   background: var(--color-bg-secondary);
 }
 
+.chat-task-panel.has-run {
+  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
+}
+
+.chat-task-panel.has-run .chat-task-list {
+  grid-column: 2;
+}
+
+.chat-task-panel--run-only {
+  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
+}
+
 .chat-task-panel-head {
   min-width: 0;
   display: flex;
@@ -181,6 +193,84 @@
   background: var(--color-danger);
 }
 
+.chat-run-report {
+  grid-column: 2;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.chat-run-report-main,
+.chat-run-report-tools {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.chat-run-report-main span,
+.chat-run-report-tools span {
+  max-width: 260px;
+  overflow: hidden;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-run-report-status.is-active {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+  color: var(--color-text);
+}
+
+.chat-run-report-status.is-done,
+.chat-run-report-tools span.is-done {
+  color: var(--color-text);
+}
+
+.chat-run-report-status.is-error,
+.chat-run-report-tools span.is-error {
+  border-color: color-mix(in srgb, var(--color-danger) 35%, var(--color-border));
+  color: var(--color-danger);
+}
+
+.chat-run-alert {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-lg);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-danger-light);
+}
+
+.chat-run-alert strong {
+  display: block;
+  margin-bottom: 2px;
+  font-size: var(--font-size-sm);
+}
+
+.chat-run-alert p,
+.chat-run-alert span {
+  display: block;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height);
+}
+
+.chat-run-alert-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
 @media (max-width: 760px) {
   .chat-task-panel {
     grid-template-columns: 1fr;
@@ -189,6 +279,15 @@
 
   .chat-task-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .chat-task-panel.has-run .chat-task-list,
+  .chat-run-report {
+    grid-column: 1;
+  }
+
+  .chat-run-alert {
+    flex-direction: column;
   }
 }
 

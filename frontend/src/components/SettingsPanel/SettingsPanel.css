@@ -25,18 +25,68 @@
 
 .settings-body {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  overflow: hidden;
   padding: var(--space-lg);
+  gap: var(--space-lg);
+  background: var(--color-bg-secondary);
 }
 
-.settings-sections-grid {
+.settings-inner-nav {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  overflow-y: auto;
+  padding: var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.settings-inner-nav button {
   display: grid;
-  gap: var(--space-lg);
-  max-width: 1080px;
-  margin: 0 auto;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+}
+
+.settings-inner-nav button:hover,
+.settings-inner-nav button.active {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-secondary);
+}
+
+.settings-inner-nav strong {
+  font-size: var(--font-size-sm);
+}
+
+.settings-inner-nav span {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+}
+
+.settings-page {
+  min-width: 0;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding-right: 2px;
 }
 
 .settings-card {
+  flex: 0 0 auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg);
@@ -65,7 +115,14 @@
   padding: var(--space-lg);
 }
 
-.settings-card--actions .settings-card-body {
+.settings-save-panel {
+  flex: 0 0 auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.settings-save-panel .settings-card-body {
   display: flex;
   flex-direction: column;
 }
@@ -347,8 +404,22 @@
 }
 
 @media (max-width: 760px) {
-  .settings-sections-grid {
-    gap: var(--space-md);
+  .settings-body {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+    padding: var(--space-md);
+  }
+
+  .settings-inner-nav {
+    min-height: auto;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex-direction: row;
+  }
+
+  .settings-inner-nav button {
+    min-width: 160px;
   }
 
   .settings-card-body {

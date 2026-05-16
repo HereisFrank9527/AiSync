@@ -12,7 +12,10 @@ class WriteChapterTool(BaseTool):
     workspace_view = ToolWorkspaceView(view_id="chapters", label="章节管理")
 
     def file_access(self) -> ToolFileAccess:
-        return ToolFileAccess(write=["chapters/**/*.md"])
+        return ToolFileAccess(
+            read=["plot/foreshadows.json", "plot/outline.json", "chapters/**/ch-meta.yaml"],
+            write=["chapters/**/*.md"],
+        )
 
     def presentation(self) -> ToolPresentation:
         return ToolPresentation(type="stream:editor", description="章节编辑器预览")
@@ -27,6 +30,17 @@ class WriteChapterTool(BaseTool):
             "required": ["path", "content"],
             "additionalProperties": False,
         }
+
+    def build_prompt(self, params: dict[str, Any]) -> str:
+        path = str(params.get("path") or "chapters/vol-01/ch-001.md")
+        requirements = str(params.get("content") or "").strip()
+        return (
+            "请根据当前项目设定撰写章节，并调用 `write_chapter` 工具写入章节文件。\n"
+            f"目标章节路径：{path}\n"
+            f"写作要求或草稿：{requirements or '按当前大纲、章节元数据和项目上下文创作。'}\n"
+            "请优先参考 plot/foreshadows.json：如果存在与目标章节、大纲节点或标签相关的伏笔，"
+            "需要判断本章应埋设、推进还是回收；不要主动使用已废弃伏笔。"
+        )
 
     async def execute(self, params: dict[str, Any], context: ProjectContext) -> ToolResult:
         path = str(params["path"])

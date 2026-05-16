@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type {
+  ForeshadowItem,
   StoryChapter,
   StoryChapterMetadataUpdate,
   StoryChapters,
+  StoryForeshadows,
+  StoryOutline,
   ToolDescriptor,
   VectorIndexStatus,
   VectorSearchResult,
@@ -12,6 +15,8 @@ import "./ChapterPanel.css";
 
 interface ChapterPanelProps {
   chapters: StoryChapters | null;
+  outline: StoryOutline | null;
+  foreshadows: StoryForeshadows | null;
   loading: boolean;
   saving: boolean;
   error: string;
@@ -36,6 +41,20 @@ const STATUS_OPTIONS = [
   { value: "revising", label: "修订中" },
   { value: "done", label: "已完成" },
 ];
+
+const FORESHADOW_STATUS_LABELS: Record<string, string> = {
+  planned: "计划埋",
+  planted: "已埋下",
+  developing: "推进中",
+  paid_off: "已回收",
+  abandoned: "废弃",
+};
+
+const FORESHADOW_IMPORTANCE_LABELS: Record<string, string> = {
+  minor: "轻量",
+  medium: "普通",
+  major: "关键",
+};
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat().format(value);
@@ -62,8 +81,82 @@ function vectorStatusLabel(status: VectorIndexStatus | null) {
   return status.status;
 }
 
+function foreshadowStatusLabel(value: string) {
+  return FORESHADOW_STATUS_LABELS[value] ?? value;
+}
+
+function foreshadowImportanceLabel(value: string) {
+  return FORESHADOW_IMPORTANCE_LABELS[value] ?? value;
+}
+
+function uniqueForeshadows(items: ForeshadowItem[]) {
+  const seen = new Set<string>();
+  const result: ForeshadowItem[] = [];
+  for (const item of items) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    result.push(item);
+  }
+  return result;
+}
+
+interface ExplainedForeshadow extends ForeshadowItem {
+  matchReasons: string[];
+  action: string;
+}
+
+function explainForeshadow(item: ForeshadowItem, active: StoryChapter, group: string): ExplainedForeshadow {
+  const reasons: string[] = [];
+  let action = "参考";
+  if (item.payoff_chapter === active.path) {
+    reasons.push("目标章节是回收章节");
+    action = "优先回收";
+  }
+  if (item.plant_chapter === active.path) {
+    reasons.push("目标章节是埋设章节");
+    if (action === "参考") action = "埋设";
+  }
+  if (active.outline_id && item.outline_ids.includes(active.outline_id)) {
+    reasons.push("关联同一大纲节点");
+    if (action === "参考" && ["planted", "developing"].includes(item.status)) action = "推进";
+  }
+  if (item.related_files.includes(active.path)) {
+    reasons.push("相关文件包含本章");
+  }
+  if (group && !reasons.length) reasons.push(group);
+  if (item.status === "paid_off") action = "避免重复回收";
+  if (item.status === "abandoned") action = "不要主动使用";
+  return { ...item, matchReasons: reasons, action };
+}
+
+function ForeshadowGroup({ title, items }: { title: string; items: ExplainedForeshadow[] }) {
+  return (
+    <div className="chapter-foreshadow-group">
+      <strong>{title}</strong>
+      <div>
+        {items.map((item) => (
+          <article key={item.id} className={`chapter-foreshadow-item is-${item.importance}`}>
+            <div>
+              <span>{item.title}</span>
+              <em>{foreshadowStatusLabel(item.status)} · {foreshadowImportanceLabel(item.importance)}</em>
+            </div>
+            {item.summary && <p>{item.summary}</p>}
+            <div className="chapter-foreshadow-explain">
+              <b>{item.action}</b>
+              {item.matchReasons.slice(0, 3).map((reason) => <i key={reason}>{reason}</i>)}
+            </div>
+            {item.tags.length > 0 && <small>{item.tags.join(" / ")}</small>}
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function ChapterPanel({
   chapters,
+  outline,
+  foreshadows,
   loading,
   saving,
   error,
@@ -85,6 +178,16 @@ export default function ChapterPanel({
   const editTool = tools.find((tool) => tool.name === "edit_chapter");
   const consistencyTool = tools.find((tool) => tool.name === "consistency_check");
   const items = chapters?.items ?? [];
+  const foreshadowItems = foreshadows?.items ?? [];
+  const outlineItems = useMemo(() => outline?.items ?? [], [outline?.items]);
+  const outlineTitleById = useMemo(() => {
+    const titles = new Map<string, string>();
+    outlineItems.forEach((item, index) => {
+      const id = String(item.id || `outline-${index + 1}`);
+      titles.set(id, String(item.title || item.raw || `节点 ${index + 1}`));
+    });
+    return titles;
+  }, [outlineItems]);
   const [query, setQuery] = useState("");
   const [activePath, setActivePath] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -93,6 +196,7 @@ export default function ChapterPanel({
     summary: "",
     target_characters: 0,
     revision: 0,
+    outline_id: "",
   });
   const [editing, setEditing] = useState(false);
   const [showVectorResults, setShowVectorResults] = useState(false);
@@ -102,6 +206,24 @@ export default function ChapterPanel({
     return items.filter((item) => `${item.path}\n${item.title}\n${item.summary}\n${item.content}`.toLowerCase().includes(normalized));
   }, [items, query]);
   const active = items.find((item) => item.path === activePath) ?? visibleItems[0] ?? null;
+  const relatedForeshadows = useMemo(() => {
+    if (!active) return { planting: [], payoff: [], outline: [], related: [], all: [] };
+    const planting = foreshadowItems.filter((item) => item.plant_chapter === active.path);
+    const payoff = foreshadowItems.filter((item) => item.payoff_chapter === active.path);
+    const outlineRelated = active.outline_id
+      ? foreshadowItems.filter((item) => item.outline_ids.includes(active.outline_id))
+      : [];
+    const fileRelated = foreshadowItems.filter((item) => item.related_files.includes(active.path));
+    return {
+      planting: planting.map((item) => explainForeshadow(item, active, "本章埋设")),
+      payoff: payoff.map((item) => explainForeshadow(item, active, "本章回收")),
+      outline: uniqueForeshadows(outlineRelated.filter((item) => !planting.includes(item) && !payoff.includes(item)))
+        .map((item) => explainForeshadow(item, active, "同大纲节点")),
+      related: uniqueForeshadows(fileRelated.filter((item) => !planting.includes(item) && !payoff.includes(item) && !outlineRelated.includes(item)))
+        .map((item) => explainForeshadow(item, active, "相关文件")),
+      all: uniqueForeshadows([...payoff, ...planting, ...outlineRelated, ...fileRelated]),
+    };
+  }, [active, foreshadowItems]);
 
   useEffect(() => {
     if (!active) {
@@ -114,6 +236,7 @@ export default function ChapterPanel({
       summary: active.summary || "",
       target_characters: active.target_characters || 0,
       revision: active.revision || 0,
+      outline_id: active.outline_id || "",
     });
     setShowVectorResults(false);
   }, [active]);
@@ -123,7 +246,8 @@ export default function ChapterPanel({
     metadataDraft.status !== active.status ||
     metadataDraft.summary !== active.summary ||
     Number(metadataDraft.target_characters || 0) !== active.target_characters ||
-    Number(metadataDraft.revision || 0) !== active.revision
+    Number(metadataDraft.revision || 0) !== active.revision ||
+    metadataDraft.outline_id !== active.outline_id
   ));
   const setMetadataField = <K extends keyof StoryChapterMetadataUpdate>(key: K, value: StoryChapterMetadataUpdate[K]) => {
     setMetadataDraft((current) => ({ ...current, [key]: value }));
@@ -172,6 +296,7 @@ export default function ChapterPanel({
                 <strong>{item.title}</strong>
                 <span>{item.path}</span>
                 <em>{formatNumber(item.characters)} 字符</em>
+                {item.outline_id && <small>{outlineTitleById.get(item.outline_id) ?? "已关联大纲"}</small>}
               </button>
             ))}
           </aside>
@@ -182,7 +307,10 @@ export default function ChapterPanel({
                 <div className="chapter-detail-heading">
                   <div>
                     <h3>{active.title}</h3>
-                    <p>{active.path}</p>
+                    <p>
+                      {active.path}
+                      {active.outline_id && ` · 大纲：${outlineTitleById.get(active.outline_id) ?? active.outline_id}`}
+                    </p>
                   </div>
                   <div className="chapter-detail-actions">
                     <button className="btn-secondary" onClick={() => onOpenFile(active.path)}>打开文件</button>
@@ -203,6 +331,32 @@ export default function ChapterPanel({
                     <strong>摘要</strong>
                     <p>{active.summary}</p>
                   </div>
+                )}
+                {relatedForeshadows.all.length > 0 && (
+                  <section className="chapter-foreshadow-panel">
+                    <header>
+                      <div>
+                        <h4>相关伏笔</h4>
+                        <p>
+                          {relatedForeshadows.payoff.length} 个计划回收 · {relatedForeshadows.planting.length} 个埋设 · {relatedForeshadows.outline.length} 个大纲关联
+                        </p>
+                      </div>
+                    </header>
+                    <div className="chapter-foreshadow-groups">
+                      {relatedForeshadows.payoff.length > 0 && (
+                        <ForeshadowGroup title="本章计划回收" items={relatedForeshadows.payoff} />
+                      )}
+                      {relatedForeshadows.planting.length > 0 && (
+                        <ForeshadowGroup title="本章埋设" items={relatedForeshadows.planting} />
+                      )}
+                      {relatedForeshadows.outline.length > 0 && (
+                        <ForeshadowGroup title="同大纲节点" items={relatedForeshadows.outline} />
+                      )}
+                      {relatedForeshadows.related.length > 0 && (
+                        <ForeshadowGroup title="相关文件" items={relatedForeshadows.related} />
+                      )}
+                    </div>
+                  </section>
                 )}
                 <section className="chapter-vector-panel">
                   <header>
@@ -256,6 +410,7 @@ export default function ChapterPanel({
                         summary: metadataDraft.summary.trim(),
                         target_characters: Number(metadataDraft.target_characters || 0),
                         revision: Number(metadataDraft.revision || 0),
+                        outline_id: metadataDraft.outline_id,
                       })}
                     >
                       {saving ? "保存中" : "保存信息"}
@@ -287,6 +442,23 @@ export default function ChapterPanel({
                         value={metadataDraft.revision}
                         onChange={(event) => setMetadataField("revision", Number(event.target.value))}
                       />
+                    </label>
+                    <label className="chapter-meta-wide">
+                      <span>关联大纲节点</span>
+                      <select
+                        value={metadataDraft.outline_id}
+                        onChange={(event) => setMetadataField("outline_id", event.target.value)}
+                      >
+                        <option value="">未关联</option>
+                        {outlineItems.map((item, index) => {
+                          const id = String(item.id || `outline-${index + 1}`);
+                          return (
+                            <option key={id} value={id}>
+                              {index + 1}. {String(item.title || item.raw || `节点 ${index + 1}`)}
+                            </option>
+                          );
+                        })}
+                      </select>
                     </label>
                     <label className="chapter-meta-wide">
                       <span>摘要</span>

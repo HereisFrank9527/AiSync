@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -36,6 +37,11 @@ class MemoryContext:
     recent_messages: list[dict[str, str]]
     summary_pending: bool = False
     summary_quality: dict[str, object] | None = None
+    summary_updated_at: str | None = None
+    summary_chars: int = 0
+    recent_window: int = RECENT_MEMORY_MESSAGES
+    old_message_count: int = 0
+    total_message_count: int = 0
 
 
 class ConversationMemory:
@@ -52,6 +58,12 @@ class ConversationMemory:
     def save_summary(self, conversation_id: str, summary: str) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         self._summary_path(conversation_id).write_text(summary.strip() + "\n", encoding="utf-8")
+
+    def summary_updated_at(self, conversation_id: str) -> str | None:
+        path = self._summary_path(conversation_id)
+        if not path.exists():
+            return None
+        return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
 
     def save_summary_quality(self, conversation_id: str, report: MemoryQualityReport) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -84,6 +96,11 @@ class ConversationMemory:
             recent_messages=self._messages_to_history(recent_source),
             summary_pending=len(old_messages) >= SUMMARY_TRIGGER_MESSAGES,
             summary_quality=evaluate_summary_quality(summary, old_messages).model_dump() if summary and old_messages else None,
+            summary_updated_at=self.summary_updated_at(conversation.id),
+            summary_chars=len(summary),
+            recent_window=RECENT_MEMORY_MESSAGES,
+            old_message_count=len(old_messages),
+            total_message_count=len(conversation.messages),
         )
 
     async def update_after_turn(

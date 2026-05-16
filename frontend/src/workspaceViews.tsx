@@ -1,13 +1,16 @@
 import type { ReactNode } from "react";
 import ChapterPanel from "./components/ChapterPanel";
 import CharacterPanel from "./components/CharacterPanel";
+import ForeshadowPanel from "./components/ForeshadowPanel";
 import OutlinePanel from "./components/OutlinePanel";
 import WorldviewPanel from "./components/WorldviewPanel";
 import type {
+  ForeshadowItem,
   OutlineItem,
   StoryChapterMetadataUpdate,
   StoryChapters,
   StoryCharacters,
+  StoryForeshadows,
   StoryOutline,
   StoryWorldview,
   ToolDescriptor,
@@ -33,6 +36,14 @@ export interface WorkspaceViewContext {
     saveDocument: (path: string, content: string) => Promise<unknown>;
     saveMetadata: (path: string, metadata: StoryChapterMetadataUpdate) => Promise<unknown>;
   };
+  foreshadows: {
+    foreshadows: StoryForeshadows | null;
+    loading: boolean;
+    saving: boolean;
+    error: string;
+    refresh: () => void;
+    save: (items: ForeshadowItem[]) => void | Promise<unknown>;
+  };
   vector: {
     status: VectorIndexStatus | null;
     results: VectorSearchResult[];
@@ -54,7 +65,9 @@ export interface WorkspaceViewContext {
     saving: boolean;
     error: string;
     refresh: () => void;
-    saveDocument: (path: string, content: string) => void | Promise<unknown>;
+    saveDocument: (path: string, content: string) => { path: string } | null | void | Promise<{ path: string } | null | void>;
+    renameDocument: (oldPath: string, newPath: string) => { path: string } | null | void | Promise<{ path: string } | null | void>;
+    deleteDocument: (path: string) => boolean | void | Promise<boolean | unknown>;
   };
   tools: ToolDescriptor[];
   openTool: (tool: ToolDescriptor, initialParams?: Record<string, unknown>) => void;
@@ -69,9 +82,10 @@ export interface WorkspaceViewDefinition {
 export const WORKSPACE_VIEW_REGISTRY: WorkspaceViewDefinition[] = [
   {
     viewId: "outline",
-    render: ({ outline, tools, openTool }) => (
+    render: ({ outline, chapters, tools, openTool }) => (
       <OutlinePanel
         outline={outline.outline}
+        chapters={chapters.chapters}
         loading={outline.loading}
         error={outline.error}
         tools={tools}
@@ -82,10 +96,27 @@ export const WORKSPACE_VIEW_REGISTRY: WorkspaceViewDefinition[] = [
     ),
   },
   {
+    viewId: "foreshadows",
+    render: ({ foreshadows, outline, chapters }) => (
+      <ForeshadowPanel
+        foreshadows={foreshadows.foreshadows}
+        outline={outline.outline}
+        chapters={chapters.chapters}
+        loading={foreshadows.loading}
+        saving={foreshadows.saving}
+        error={foreshadows.error}
+        onRefresh={foreshadows.refresh}
+        onSave={foreshadows.save}
+      />
+    ),
+  },
+  {
     viewId: "chapters",
-    render: ({ chapters, vector, tools, openTool, openFile }) => (
+    render: ({ outline, chapters, foreshadows, vector, tools, openTool, openFile }) => (
       <ChapterPanel
         chapters={chapters.chapters}
+        outline={outline.outline}
+        foreshadows={foreshadows.foreshadows}
         loading={chapters.loading}
         saving={chapters.saving}
         error={chapters.error}
@@ -129,6 +160,8 @@ export const WORKSPACE_VIEW_REGISTRY: WorkspaceViewDefinition[] = [
         tools={tools}
         onRefresh={worldview.refresh}
         onSaveDocument={worldview.saveDocument}
+        onRenameDocument={worldview.renameDocument}
+        onDeleteDocument={worldview.deleteDocument}
         onOpenTool={openTool}
       />
     ),

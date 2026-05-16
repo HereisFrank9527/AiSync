@@ -1,5 +1,5 @@
 import { useMemo, useRef, useEffect, useLayoutEffect, useState, type KeyboardEvent } from "react";
-import type { AgentEvent, ConversationStatus, ToolDescriptor } from "../../types";
+import type { AgentEvent, AgentRunRecord, ConversationStatus, ToolDescriptor } from "../../types";
 import { AiRender, eventToRender } from "../AiRender";
 import MarkdownView from "../MarkdownView";
 import "./ChatPanel.css";
@@ -10,6 +10,7 @@ interface ChatPanelProps {
   connected: boolean;
   conversationStatus?: ConversationStatus | null;
   conversationLastError?: string | null;
+  activeRun?: AgentRunRecord | null;
   tools: ToolDescriptor[];
   onSend: (
     content: string,
@@ -17,6 +18,8 @@ interface ChatPanelProps {
     options?: { modelContent?: string; metadata?: Record<string, unknown> },
   ) => void;
   onInterrupt: () => void;
+  onRetryLast?: () => void;
+  onContinueWithError?: (error: string) => void;
   input: string;
   onInputChange: (value: string) => void;
   showConversations?: boolean;
@@ -87,8 +90,11 @@ function normalizeContent(content?: string) {
 
 function memoryStatusText(event: AgentEvent) {
   const memory = event.memory ?? {};
-  const parts = [`近期 ${memory.recent_messages ?? 0} 条`];
-  parts.push(memory.summary ? "已注入摘要" : "无摘要");
+  const parts = [`近期 ${memory.recent_messages ?? 0}/${memory.recent_window ?? "?"} 条`];
+  if (typeof memory.total_message_count === "number") parts.push(`总计 ${memory.total_message_count} 条`);
+  if (typeof memory.old_message_count === "number" && memory.old_message_count > 0) parts.push(`旧消息 ${memory.old_message_count} 条`);
+  parts.push(memory.summary ? `已注入摘要 ${memory.summary_chars ?? 0} 字符` : "无摘要");
+  if (memory.summary_updated_at) parts.push(`摘要更新 ${new Date(memory.summary_updated_at).toLocaleString()}`);
   if (memory.summary_pending) parts.push("摘要后台更新中");
   const quality = memory.summary_quality;
   if (quality?.status === "weak" || quality?.status === "poor") {
@@ -105,6 +111,10 @@ function isSystemStatusEvent(event: AgentEvent) {
 
 function isTaskListEvent(event: AgentEvent) {
   return event.type === "agent_task_list";
+}
+
+function isAgentRunEvent(event: AgentEvent) {
+  return event.type === "agent_run";
 }
 
 function systemStatusText(event: AgentEvent) {
@@ -160,6 +170,12 @@ function getWorkState(events: AgentEvent[], connected: boolean) {
     if (event.type === "agent_final") {
       return { label: "回复已完成", kind: "done" as const };
     }
+    if (event.type === "agent_run" && event.run) {
+      if (event.run.status === "running") return { label: event.run.phase_label || "Agent 正在工作", kind: "working" as const };
+      if (event.run.status === "failed") return { label: event.run.error ? `本轮失败：${event.run.error}` : "本轮回复失败", kind: "error" as const };
+      if (event.run.status === "interrupted") return { label: "本轮回复已中断", kind: "done" as const };
+      if (event.run.status === "completed") return { label: "本轮回复已完成", kind: "done" as const };
+    }
     if (event.type === "error" || event.type === "agent_limit_reached") {
       return { label: event.content ?? "前台错误", kind: "error" as const };
     }
@@ -187,7 +203,12 @@ function conversationStatusToWorkState(
   status: ConversationStatus | null | undefined,
   lastError: string | null | undefined,
   connected: boolean,
+  activeRun?: AgentRunRecord | null,
 ) {
+  if (activeRun?.status === "running") return { label: activeRun.phase_label || "Agent 正在工作", kind: "working" as const };
+  if (activeRun?.status === "failed") return { label: activeRun.error ? `本轮失败：${activeRun.error}` : "本轮回复失败", kind: "error" as const };
+  if (activeRun?.status === "interrupted") return { label: "本轮回复已中断", kind: "done" as const };
+  if (activeRun?.status === "completed") return { label: "本轮回复已完成", kind: "done" as const };
   if (status === "running") return { label: "上次响应未正常结束", kind: "error" as const };
   if (status === "failed") return { label: lastError ? `上次失败：${lastError}` : "上次响应失败", kind: "error" as const };
   if (status === "interrupted") return { label: "上次响应已中断", kind: "done" as const };
@@ -332,6 +353,25 @@ function parseAgentTaskList(event?: AgentEvent): AgentTaskList | null {
   };
 }
 
+function runStatusLabel(run: AgentRunRecord) {
+  if (run.status === "running") return run.phase_label || "运行中";
+  if (run.status === "completed") return "已完成";
+  if (run.status === "failed") return run.error ? `失败：${run.error}` : "失败";
+  if (run.status === "interrupted") return "已中断";
+  return run.status;
+}
+
+function runStatusClass(run: AgentRunRecord) {
+  if (run.status === "running") return "is-active";
+  if (run.status === "failed") return "is-error";
+  return "is-done";
+}
+
+function formatRunTime(value?: string | null) {
+  if (!value) return "";
+  return new Date(value).toLocaleTimeString();
+}
+
 function extractChoiceOptions(content?: string): ChoiceOption[] {
   if (!content) return [];
   const lines = content.replace(/\r\n/g, "\n").split("\n");
@@ -380,9 +420,12 @@ export default function ChatPanel({
   connected,
   conversationStatus,
   conversationLastError,
+  activeRun,
   tools,
   onSend,
   onInterrupt,
+  onRetryLast,
+  onContinueWithError,
   input,
   onInputChange,
   showConversations,
@@ -408,9 +451,14 @@ export default function ChatPanel({
   const workState = useMemo(
     () => liveEvents.length > 0
       ? getWorkState(liveEvents, connected)
-      : conversationStatusToWorkState(conversationStatus, conversationLastError, connected),
-    [connected, conversationLastError, conversationStatus, liveEvents],
+      : conversationStatusToWorkState(conversationStatus, conversationLastError, connected, activeRun),
+    [activeRun, connected, conversationLastError, conversationStatus, liveEvents],
   );
+  const visibleRunIssue = activeRun?.status === "failed"
+    ? activeRun.error || "本轮 Agent 执行失败"
+    : activeRun?.status === "running" && conversationStatus !== "running"
+      ? "检测到未收敛的运行记录，可能是上次窗口关闭或连接中断导致。"
+      : "";
   const visibleEvents = useMemo(() => displayEvents.slice(visibleStart), [displayEvents, visibleStart]);
   const allToolsEnabled = selectedTools === null;
   const enabledToolCount = allToolsEnabled ? tools.length : selectedTools.length;
@@ -571,6 +619,11 @@ export default function ChatPanel({
     await navigator.clipboard.writeText(content);
   };
 
+  const copyRunError = async () => {
+    const text = activeRun?.error || conversationLastError || "";
+    if (text) await navigator.clipboard.writeText(text);
+  };
+
   const quoteSelectedIntoInput = () => {
     const references = quoteReferencesFromEvents(selectedMessages);
     if (!references.length) return;
@@ -706,7 +759,7 @@ export default function ChatPanel({
       </header>
 
       {taskList && (
-        <div className={`chat-task-panel${taskList.done ? " is-done" : ""}`}>
+        <div className={`chat-task-panel${taskList.done ? " is-done" : ""}${activeRun ? " has-run" : ""}`}>
           <div className="chat-task-panel-head">
             <strong>Agent 任务</strong>
             <span>{taskList.activeLabel}</span>
@@ -719,6 +772,78 @@ export default function ChatPanel({
               </li>
             ))}
           </ol>
+          {activeRun && (
+            <div className="chat-run-report">
+              <div className="chat-run-report-main">
+                <span className={`chat-run-report-status ${runStatusClass(activeRun)}`}>{runStatusLabel(activeRun)}</span>
+                <span>{activeRun.run_id}</span>
+                {activeRun.input_preview && <span>{activeRun.input_preview}</span>}
+                <span>{formatRunTime(activeRun.started_at)}{activeRun.finished_at ? ` - ${formatRunTime(activeRun.finished_at)}` : ""}</span>
+              </div>
+              {activeRun.tool_calls.length > 0 && (
+                <div className="chat-run-report-tools">
+                  {activeRun.tool_calls.slice(-4).map((tool, index) => (
+                    <span key={`${tool.name ?? "tool"}-${index}`} className={tool.status === "failed" ? "is-error" : "is-done"}>
+                      {tool.name ?? "unknown"} · {tool.status ?? "completed"}{typeof tool.duration_ms === "number" ? ` · ${tool.duration_ms}ms` : ""}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {!taskList && activeRun && (
+        <div className="chat-task-panel chat-task-panel--run-only has-run">
+          <div className="chat-task-panel-head">
+            <strong>Agent 任务</strong>
+            <span>{runStatusLabel(activeRun)}</span>
+          </div>
+          <div className="chat-run-report">
+            <div className="chat-run-report-main">
+              <span className={`chat-run-report-status ${runStatusClass(activeRun)}`}>{runStatusLabel(activeRun)}</span>
+              <span>{activeRun.run_id}</span>
+              {activeRun.input_preview && <span>{activeRun.input_preview}</span>}
+              <span>{formatRunTime(activeRun.started_at)}{activeRun.finished_at ? ` - ${formatRunTime(activeRun.finished_at)}` : ""}</span>
+            </div>
+            {activeRun.tool_calls.length > 0 && (
+              <div className="chat-run-report-tools">
+                {activeRun.tool_calls.slice(-4).map((tool, index) => (
+                  <span key={`${tool.name ?? "tool"}-${index}`} className={tool.status === "failed" ? "is-error" : "is-done"}>
+                    {tool.name ?? "unknown"} · {tool.status ?? "completed"}{typeof tool.duration_ms === "number" ? ` · ${tool.duration_ms}ms` : ""}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {visibleRunIssue && (
+        <div className="chat-run-alert">
+          <div>
+            <strong>{activeRun?.status === "failed" ? "Agent 执行失败" : "Agent 状态需要确认"}</strong>
+            <p>{visibleRunIssue}</p>
+            {activeRun?.input_preview && <span>上次输入：{activeRun.input_preview}</span>}
+          </div>
+          <div className="chat-run-alert-actions">
+            {activeRun?.status === "failed" && (
+              <button className="btn-ghost" onClick={() => void copyRunError()}>
+                复制错误
+              </button>
+            )}
+            {activeRun?.input_preview && onRetryLast && (
+              <button className="btn-secondary" onClick={onRetryLast} disabled={!connected}>
+                重试本轮
+              </button>
+            )}
+            {visibleRunIssue && onContinueWithError && (
+              <button className="btn-secondary" onClick={() => onContinueWithError(visibleRunIssue)} disabled={!connected}>
+                带错误继续问
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -764,6 +889,7 @@ export default function ChatPanel({
           const choiceOptions = !isUser && event.type === "agent_final" ? extractChoiceOptions(event.content) : [];
           const userDisplay = isUser ? displayReferencedUserContent(event.content, event.metadata) : null;
           if (isTaskListEvent(event)) return null;
+          if (isAgentRunEvent(event)) return null;
           if (isSystemStatus) {
             return (
               <div key={i} className="chat-message chat-message--system">

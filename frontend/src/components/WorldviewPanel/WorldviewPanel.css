@@ -92,6 +92,58 @@
   white-space: nowrap;
 }
 
+.worldview-templates {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.worldview-templates h3 {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.worldview-template-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-xs);
+}
+
+.worldview-template {
+  min-height: 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: var(--space-xs);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  text-align: left;
+}
+
+.worldview-template:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+}
+
+.worldview-template strong {
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+}
+
+.worldview-template span {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.worldview-template.exists {
+  background: var(--color-bg);
+}
+
 .worldview-detail {
   min-height: 480px;
   padding: var(--space-lg);
@@ -115,6 +167,32 @@
   margin: 0;
   color: var(--color-text-secondary);
   word-break: break-all;
+}
+
+.worldview-rename {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-sm);
+  align-items: end;
+  margin-bottom: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+.worldview-rename label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.worldview-rename span {
+  grid-column: 1 / -1;
+  color: var(--color-danger);
+  font-size: var(--font-size-xs);
 }
 
 .worldview-editor {
@@ -145,6 +223,10 @@
   }
 
   .worldview-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .worldview-rename {
     grid-template-columns: 1fr;
   }
 

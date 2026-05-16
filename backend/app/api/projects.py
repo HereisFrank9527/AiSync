@@ -109,15 +109,45 @@ async def build_project_overview(context: ProjectContext) -> dict[str, Any]:
         if path.startswith("world/") and path.endswith(".md")
     )
     outline_items = 0
+    completed_outline_items = 0
+    foreshadow_items = 0
+    paid_off_foreshadow_items = 0
     if await context.exists("plot/outline.json"):
         try:
             outline_data = await context.read_json("plot/outline.json")
             if isinstance(outline_data, dict):
-                outline_items = len(outline_data.get("items") or outline_data.get("chapters") or [])
+                outline_entries = outline_data.get("items") or outline_data.get("chapters") or []
             elif isinstance(outline_data, list):
-                outline_items = len(outline_data)
+                outline_entries = outline_data
+            else:
+                outline_entries = []
+            if isinstance(outline_entries, list):
+                outline_items = len(outline_entries)
+                completed_outline_items = sum(
+                    1 for item in outline_entries
+                    if isinstance(item, dict) and item.get("status") == "done"
+                )
         except Exception:
             outline_items = 0
+            completed_outline_items = 0
+    if await context.exists("plot/foreshadows.json"):
+        try:
+            foreshadow_data = await context.read_json("plot/foreshadows.json")
+            if isinstance(foreshadow_data, dict):
+                foreshadow_entries = foreshadow_data.get("items") or []
+            elif isinstance(foreshadow_data, list):
+                foreshadow_entries = foreshadow_data
+            else:
+                foreshadow_entries = []
+            if isinstance(foreshadow_entries, list):
+                foreshadow_items = len(foreshadow_entries)
+                paid_off_foreshadow_items = sum(
+                    1 for item in foreshadow_entries
+                    if isinstance(item, dict) and item.get("status") == "paid_off"
+                )
+        except Exception:
+            foreshadow_items = 0
+            paid_off_foreshadow_items = 0
 
     chapters: list[dict[str, Any]] = []
     total_chars = 0
@@ -143,8 +173,13 @@ async def build_project_overview(context: ProjectContext) -> dict[str, Any]:
             "characters": len(character_files),
             "world_documents": len(world_files),
             "outline_items": outline_items,
+            "completed_outline_items": completed_outline_items,
+            "foreshadow_items": foreshadow_items,
+            "paid_off_foreshadow_items": paid_off_foreshadow_items,
             "chapter_progress": progress_ratio(len(chapter_files), project_info["target_chapters"]),
             "character_progress": progress_ratio(total_chars, project_info["target_characters"]),
+            "outline_progress": progress_ratio(completed_outline_items, outline_items),
+            "foreshadow_progress": progress_ratio(paid_off_foreshadow_items, foreshadow_items),
         },
         "chapters": chapters,
         "world_documents": world_files,

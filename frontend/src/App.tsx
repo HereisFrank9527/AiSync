@@ -15,6 +15,7 @@ import { useCharacters } from "./hooks/useCharacters";
 import { useChapters } from "./hooks/useChapters";
 import { useConversations } from "./hooks/useConversations";
 import { useFileTree } from "./hooks/useFileTree";
+import { useForeshadows } from "./hooks/useForeshadows";
 import { useOutline } from "./hooks/useOutline";
 import { usePresets } from "./hooks/usePresets";
 import { useProject } from "./hooks/useProject";
@@ -56,6 +57,7 @@ function App() {
   const overview = useProjectOverview(project?.path ?? null, handleProjectNameChange);
   const chapters = useChapters(project?.path ?? null);
   const outline = useOutline(project?.path ?? null);
+  const foreshadows = useForeshadows(project?.path ?? null);
   const characters = useCharacters(project?.path ?? null);
   const worldview = useWorldview(project?.path ?? null);
   const presets = usePresets();
@@ -85,7 +87,7 @@ function App() {
     void conversations.refresh();
   }, [conversations.refresh, conversations.setActiveConversationId]);
 
-  const { connected, events, historyVersion, send, interrupt, setPresetId, setHistory, clearEvents } =
+  const { connected, events, historyVersion, activeRun, send, interrupt, setPresetId, setHistory, clearEvents } =
     useAgentSocket(project?.path ?? null, conversations.activeConversationId, handleConversationIdChange);
 
   const lastEvent = events[events.length - 1];
@@ -228,9 +230,17 @@ function App() {
                 connected={connected}
                 conversationStatus={conversations.activeConversation?.status ?? null}
                 conversationLastError={conversations.activeConversation?.last_error ?? null}
+                activeRun={activeRun}
                 tools={tools.tools}
                 onSend={send}
                 onInterrupt={interrupt}
+                onRetryLast={() => {
+                  if (!activeRun?.input_preview) return;
+                  send(activeRun.input_preview);
+                }}
+                onContinueWithError={(error) => {
+                  setInput(`刚才 Agent 运行失败，错误如下：\n${error}\n\n请基于这个错误继续处理。`);
+                }}
                 input={input}
                 onInputChange={setInput}
                 showConversations={showConversations}
@@ -293,7 +303,15 @@ function App() {
         )}
 
         {activeToolView && renderRegisteredWorkspaceView(activeToolView.view_id as ViewId, {
-          outline,
+          outline: {
+            ...outline,
+            save: async (title, items) => {
+              const result = await outline.save(title, items);
+              void overview.refresh();
+              void vectorIndex.refresh();
+              return result;
+            },
+          },
           chapters: {
             ...chapters,
             saveDocument: async (path, content) => {
@@ -307,8 +325,49 @@ function App() {
               void overview.refresh();
             },
           },
+          foreshadows: {
+            ...foreshadows,
+            save: async (items) => {
+              const result = await foreshadows.save(items);
+              void overview.refresh();
+              void fileTree.refresh();
+              void vectorIndex.refresh();
+              return result;
+            },
+          },
           characters,
-          worldview,
+          worldview: {
+            ...worldview,
+            saveDocument: async (path, content) => {
+              const result = await worldview.saveDocument(path, content);
+              void overview.refresh();
+              void fileTree.refresh();
+              void vectorIndex.refresh();
+              return result;
+            },
+            renameDocument: async (oldPath, newPath) => {
+              const result = await worldview.renameDocument(oldPath, newPath);
+              if (selectedFilePath === oldPath && result?.path) {
+                setSelectedFilePath(result.path);
+              }
+              void overview.refresh();
+              void fileTree.refresh();
+              void vectorIndex.refresh();
+              return result;
+            },
+            deleteDocument: async (path) => {
+              const deleted = await worldview.deleteDocument(path);
+              if (deleted === false) return false;
+              if (selectedFilePath === path) {
+                setSelectedFilePath(null);
+                setSelectedFileContent("");
+              }
+              void overview.refresh();
+              void fileTree.refresh();
+              void vectorIndex.refresh();
+              return deleted;
+            },
+          },
           vector: {
             status: vectorIndex.status,
             results: vectorIndex.results,
@@ -384,9 +443,10 @@ function App() {
             void vectorIndex.refresh();
           }
           if (name === "outline_generate") void outline.refresh();
+          if (name === "foreshadow_manage") void foreshadows.refresh();
           if (name === "create_character") void characters.refresh();
           if (name === "update_worldview") void worldview.refresh();
-          if (name === "update_worldview" || name === "create_character" || name === "outline_generate") void vectorIndex.refresh();
+          if (name === "update_worldview" || name === "create_character" || name === "outline_generate" || name === "foreshadow_manage") void vectorIndex.refresh();
           return result;
         }}
         onInvoke={async (name, params, presetId) => {
@@ -398,9 +458,10 @@ function App() {
             void vectorIndex.refresh();
           }
           if (name === "outline_generate") void outline.refresh();
+          if (name === "foreshadow_manage") void foreshadows.refresh();
           if (name === "create_character") void characters.refresh();
           if (name === "update_worldview") void worldview.refresh();
-          if (name === "update_worldview" || name === "create_character" || name === "outline_generate") void vectorIndex.refresh();
+          if (name === "update_worldview" || name === "create_character" || name === "outline_generate" || name === "foreshadow_manage") void vectorIndex.refresh();
           return result;
         }}
         onUpdateDefaultPreset={async (name, presetId) => {

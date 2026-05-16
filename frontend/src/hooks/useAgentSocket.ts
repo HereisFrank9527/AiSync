@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentEvent } from "../types";
+import type { AgentEvent, AgentRunRecord } from "../types";
 import { apiBaseToWsBase } from "../config/runtime";
 import { api } from "../api/client";
 
 const LIVE_EVENT_LIMIT = 5000;
+const LIVE_EVENT_COMPACT_TARGET = 1200;
+const COMPACTIBLE_EVENT_TYPES = new Set(["stream", "agent_status", "agent_run"]);
 
 interface SendOptions {
   modelContent?: string;
@@ -22,7 +24,16 @@ function appendLiveEvent(current: AgentEvent[], event: AgentEvent) {
     }
   }
   const next = [...current, event];
-  return next.length > LIVE_EVENT_LIMIT ? next.slice(-LIVE_EVENT_LIMIT) : next;
+  return compactLiveEvents(next);
+}
+
+function compactLiveEvents(events: AgentEvent[]) {
+  if (events.length <= LIVE_EVENT_LIMIT) return events;
+  const protectedEvents = events.filter((event) => !COMPACTIBLE_EVENT_TYPES.has(event.type));
+  const recent = events.slice(-LIVE_EVENT_COMPACT_TARGET);
+  const protectedRecentIds = new Set(recent.map((event) => event));
+  const olderProtected = protectedEvents.filter((event) => !protectedRecentIds.has(event));
+  return [...olderProtected, ...recent].slice(-LIVE_EVENT_LIMIT);
 }
 
 export function useAgentSocket(
@@ -31,6 +42,7 @@ export function useAgentSocket(
   onConversationIdChange?: (conversationId: string) => void,
 ) {
   const [events, setEvents] = useState<AgentEvent[]>([]);
+  const [activeRun, setActiveRun] = useState<AgentRunRecord | null>(null);
   const [connected, setConnected] = useState(false);
   const [historyVersion, setHistoryVersion] = useState(0);
   const presetRef = useRef<string | null>(null);
@@ -70,6 +82,10 @@ export function useAgentSocket(
             onConversationIdChange?.(event.conversation_id);
             return;
           }
+          if (event.type === "agent_run" && event.run) {
+            setActiveRun(event.run);
+            return;
+          }
           if (!event.sender) event.sender = "agent";
           setEvents((current) => appendLiveEvent(current, event));
         } catch {
@@ -89,6 +105,26 @@ export function useAgentSocket(
     };
   }, [onConversationIdChange, projectPath]);
 
+  useEffect(() => {
+    if (!projectPath || !conversationId) {
+      setActiveRun(null);
+      return;
+    }
+    const params = new URLSearchParams({ project_path: projectPath, conversation_id: conversationId });
+    let cancelled = false;
+    void api
+      .get<AgentRunRecord | null>(`/agent/current/runs/latest?${params.toString()}`)
+      .then((run) => {
+        if (!cancelled) setActiveRun(run);
+      })
+      .catch(() => {
+        if (!cancelled) setActiveRun(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, projectPath]);
+
   const setPresetId = useCallback((id: string | null) => {
     presetRef.current = id;
   }, []);
@@ -100,6 +136,7 @@ export function useAgentSocket(
 
   const clearEvents = useCallback(() => {
     setEvents([]);
+    setActiveRun(null);
     setHistoryVersion((current) => current + 1);
   }, []);
 
@@ -112,6 +149,7 @@ export function useAgentSocket(
       if (conversationId) payload.conversation_id = conversationId;
       if (enabledTools !== undefined) payload.enabled_tools = enabledTools;
       socketRef.current?.send(JSON.stringify(payload));
+      setActiveRun(null);
       setEvents((current) =>
         appendLiveEvent(current, { type: "user_message", content, sender: "user" as const, metadata: options?.metadata }),
       );
@@ -152,5 +190,5 @@ export function useAgentSocket(
       });
   }, [projectPath]);
 
-  return { connected, events, historyVersion, send, interrupt, setPresetId, setHistory, clearEvents };
+  return { connected, events, historyVersion, activeRun, send, interrupt, setPresetId, setHistory, clearEvents };
 }
