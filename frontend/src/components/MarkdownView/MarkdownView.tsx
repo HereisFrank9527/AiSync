@@ -5,6 +5,12 @@ interface MarkdownViewProps {
   content: string;
 }
 
+interface MarkdownSegment {
+  type: "markdown" | "think";
+  content: string;
+  complete?: boolean;
+}
+
 interface ListItem {
   content: string;
   checked?: boolean;
@@ -37,6 +43,44 @@ interface ListMarker {
 
 function isSafeHref(href: string) {
   return /^(https?:|mailto:|\/|#)/i.test(href);
+}
+
+function splitThinkSegments(content: string): MarkdownSegment[] {
+  const segments: MarkdownSegment[] = [];
+  const pattern = /<\/?think>/gi;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(content)) !== null) {
+    const tag = match[0].toLowerCase();
+    if (tag !== "<think>") continue;
+
+    if (match.index > cursor) {
+      segments.push({ type: "markdown", content: content.slice(cursor, match.index) });
+    }
+
+    const thinkStart = pattern.lastIndex;
+    let thinkEnd = content.length;
+    let complete = false;
+    let endMatch: RegExpExecArray | null;
+    while ((endMatch = pattern.exec(content)) !== null) {
+      if (endMatch[0].toLowerCase() === "</think>") {
+        thinkEnd = endMatch.index;
+        complete = true;
+        break;
+      }
+    }
+
+    segments.push({ type: "think", content: content.slice(thinkStart, thinkEnd), complete });
+    cursor = complete ? pattern.lastIndex : content.length;
+    if (!complete) break;
+  }
+
+  if (cursor < content.length) {
+    segments.push({ type: "markdown", content: content.slice(cursor) });
+  }
+
+  return segments.filter((segment) => segment.content.length > 0 || segment.type === "think");
 }
 
 function renderInline(text: string): ReactNode[] {
@@ -270,9 +314,9 @@ function parseBlocks(markdown: string): Block[] {
       continue;
     }
 
-    const heading = /^(#{1,4})\s+(.+)$/.exec(line);
+    const heading = /^(#{1,4})(?:\s+(.*))$/.exec(line);
     if (heading) {
-      blocks.push({ type: "heading", level: heading[1].length, content: heading[2] });
+      blocks.push({ type: "heading", level: heading[1].length, content: heading[2] ?? "" });
       index += 1;
       continue;
     }
@@ -317,7 +361,7 @@ function parseBlocks(markdown: string): Block[] {
       index < lines.length &&
       lines[index].trim() &&
       !/^```/.test(lines[index]) &&
-      !/^(#{1,4})\s+/.test(lines[index]) &&
+      !/^(#{1,4})\s+\S/.test(lines[index]) &&
       !isHorizontalRule(lines[index]) &&
       !(isTableRow(lines[index]) && index + 1 < lines.length && isTableDivider(lines[index + 1])) &&
       !/^>\s?/.test(lines[index]) &&
@@ -382,55 +426,83 @@ function renderList(block: ListBlock, key?: number | string): ReactNode {
   );
 }
 
+function renderBlock(block: Block, key: number | string): ReactNode {
+  if (block.type === "code") {
+    return (
+      <pre key={key}>
+        {block.language && <span className="markdown-view-code-lang">{block.language}</span>}
+        <code>{block.content}</code>
+      </pre>
+    );
+  }
+  if (block.type === "heading") {
+    const Tag = `h${block.level}` as "h1" | "h2" | "h3" | "h4";
+    return <Tag key={key}>{renderInline(block.content)}</Tag>;
+  }
+  if (block.type === "quote") {
+    return <blockquote key={key}>{renderInline(block.content)}</blockquote>;
+  }
+  if (block.type === "hr") {
+    return <hr key={key} />;
+  }
+  if (block.type === "table") {
+    return (
+      <div className="markdown-view-table-wrap" key={key}>
+        <table>
+          <thead>
+            <tr>
+              {block.headers.map((header, cellIndex) => <th key={cellIndex}>{renderInline(header)}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {block.rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {block.headers.map((_, cellIndex) => <td key={cellIndex}>{renderInline(row[cellIndex] ?? "")}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+  if (block.type === "list") {
+    return renderList(block, key);
+  }
+  return <p key={key}>{renderInline(block.content)}</p>;
+}
+
+function renderMarkdownContent(content: string, keyPrefix = "block") {
+  return parseBlocks(content).map((block, index) => renderBlock(block, `${keyPrefix}-${index}`));
+}
+
+function renderThinkSegment(segment: MarkdownSegment, index: number) {
+  const text = segment.content.trim();
+  const lineCount = text ? text.split(/\r?\n/).filter((line) => line.trim()).length : 0;
+  const summary = segment.complete ? "AI 思考" : "AI 思考中";
+  return (
+    <details className="markdown-view-think" key={`think-${index}`}>
+      <summary>
+        <span>{summary}</span>
+        <small>{lineCount > 0 ? `${lineCount} 行` : "等待内容"}</small>
+      </summary>
+      {text && <div className="markdown-view-think-body">{renderMarkdownContent(text, `think-${index}`)}</div>}
+    </details>
+  );
+}
+
 export default function MarkdownView({ content }: MarkdownViewProps) {
-  const blocks = parseBlocks(content);
+  const segments = splitThinkSegments(content);
+  if (!segments.some((segment) => segment.type === "think")) {
+    return <div className="markdown-view">{renderMarkdownContent(content)}</div>;
+  }
 
   return (
     <div className="markdown-view">
-      {blocks.map((block, index) => {
-        if (block.type === "code") {
-          return (
-            <pre key={index}>
-              {block.language && <span className="markdown-view-code-lang">{block.language}</span>}
-              <code>{block.content}</code>
-            </pre>
-          );
-        }
-        if (block.type === "heading") {
-          const Tag = `h${block.level}` as "h1" | "h2" | "h3" | "h4";
-          return <Tag key={index}>{renderInline(block.content)}</Tag>;
-        }
-        if (block.type === "quote") {
-          return <blockquote key={index}>{renderInline(block.content)}</blockquote>;
-        }
-        if (block.type === "hr") {
-          return <hr key={index} />;
-        }
-        if (block.type === "table") {
-          return (
-            <div className="markdown-view-table-wrap" key={index}>
-              <table>
-                <thead>
-                  <tr>
-                    {block.headers.map((header, cellIndex) => <th key={cellIndex}>{renderInline(header)}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {block.rows.map((row, rowIndex) => (
-                    <tr key={rowIndex}>
-                      {block.headers.map((_, cellIndex) => <td key={cellIndex}>{renderInline(row[cellIndex] ?? "")}</td>)}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          );
-        }
-        if (block.type === "list") {
-          return renderList(block, index);
-        }
-        return <p key={index}>{renderInline(block.content)}</p>;
-      })}
+      {segments.map((segment, index) => (
+        segment.type === "think"
+          ? renderThinkSegment(segment, index)
+          : renderMarkdownContent(segment.content, `segment-${index}`)
+      ))}
     </div>
   );
 }

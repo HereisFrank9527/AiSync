@@ -11,6 +11,7 @@ interface OutlinePanelProps {
   tools: ToolDescriptor[];
   onRefresh: () => void;
   onSave: (title: string, items: OutlineItem[]) => void | Promise<unknown>;
+  onImportMarkdown: () => void | Promise<unknown>;
   onOpenTool: (tool: ToolDescriptor) => void;
 }
 
@@ -37,6 +38,7 @@ export default function OutlinePanel({
   tools,
   onRefresh,
   onSave,
+  onImportMarkdown,
   onOpenTool,
 }: OutlinePanelProps) {
   const outlineTool = tools.find((tool) => tool.name === "outline_generate");
@@ -44,6 +46,7 @@ export default function OutlinePanel({
   const [title, setTitle] = useState("大纲");
   const [draftItems, setDraftItems] = useState<OutlineItem[]>([]);
   const [editing, setEditing] = useState(false);
+  const [activeTab, setActiveTab] = useState<"structure" | "raw">("structure");
   const [query, setQuery] = useState("");
   const [dragIndex, setDragIndex] = useState<number | null>(null);
 
@@ -60,6 +63,8 @@ export default function OutlinePanel({
   }, [outline?.title, sourceItems]);
 
   const items = editing ? draftItems : sourceItems;
+  const markdownOnly = outline?.format === "markdown_only";
+  const importableItems = outline?.importable_items ?? [];
   const linkedChapters = useMemo(() => {
     const groups = new Map<string, NonNullable<StoryChapters["items"]>>();
     for (const chapter of chapters?.items ?? []) {
@@ -178,6 +183,31 @@ export default function OutlinePanel({
       {error && <p className="outline-error">{error}</p>}
 
       {!loading && !error && (
+        <div className="outline-tabs">
+          <button className={activeTab === "structure" ? "active" : ""} onClick={() => setActiveTab("structure")}>
+            结构视图
+          </button>
+          <button className={activeTab === "raw" ? "active" : ""} onClick={() => setActiveTab("raw")}>
+            原文视图
+          </button>
+          <span>{markdownOnly ? "Markdown 原文尚未结构化" : `${items.length} 个结构节点`}</span>
+        </div>
+      )}
+
+      {!loading && !error && activeTab === "structure" && markdownOnly && (
+        <section className="outline-import-panel">
+          <div>
+            <h3>发现 Markdown 大纲原文</h3>
+            <p>原文会完整保留在“原文视图”。结构视图只导入明确的章节标题，卷、主线、核心问题等不会被标记为未开始节点。</p>
+            <span>可导入章节节点：{importableItems.length} 个</span>
+          </div>
+          <button className="btn-primary" disabled={importableItems.length === 0} onClick={() => void onImportMarkdown()}>
+            从原文导入章节节点
+          </button>
+        </section>
+      )}
+
+      {!loading && !error && activeTab === "structure" && (
         <section className="outline-toolbar">
           <input
             type="text"
@@ -189,7 +219,7 @@ export default function OutlinePanel({
         </section>
       )}
 
-      {!loading && !error && items.length > 0 && (
+      {!loading && !error && activeTab === "structure" && items.length > 0 && (
         <div className="outline-list">
           {visibleItems.map((item, visibleIndex) => {
             const itemIndex = items.indexOf(item);
@@ -265,25 +295,31 @@ export default function OutlinePanel({
         </div>
       )}
 
-      {!loading && !error && items.length > 0 && visibleItems.length === 0 && (
+      {!loading && !error && activeTab === "structure" && items.length > 0 && visibleItems.length === 0 && (
         <div className="outline-empty">
           <h3>没有匹配的大纲节点</h3>
           <p>换一个关键词，或清空搜索条件。</p>
         </div>
       )}
 
-      {!loading && !error && items.length === 0 && (
+      {!loading && !error && activeTab === "structure" && items.length === 0 && !markdownOnly && (
         <div className="outline-empty">
           <h3>还没有结构化大纲</h3>
           <p>可以先在 `plot/outline.md` 手写，也可以用 AI 生成/续写入口创建第一版。</p>
         </div>
       )}
 
-      {!loading && !error && outline?.content && (
+      {!loading && !error && activeTab === "raw" && outline?.content && (
         <section className="outline-raw">
           <h3>原始 Markdown</h3>
           <MarkdownView content={outline.content} />
         </section>
+      )}
+      {!loading && !error && activeTab === "raw" && !outline?.content && (
+        <div className="outline-empty">
+          <h3>暂无原文</h3>
+          <p>保存结构化大纲后会同步生成可读 Markdown。</p>
+        </div>
       )}
     </section>
   );

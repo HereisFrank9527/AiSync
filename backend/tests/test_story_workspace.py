@@ -11,6 +11,7 @@ from app.api.story import (
 )
 from app.projects.context import ProjectContext
 from app.projects.foreshadows import foreshadow_context_for_prompt
+from app.projects.outline import chapter_outline_items_from_markdown
 
 
 def test_normalize_outline_items_adds_ids_and_statuses():
@@ -35,6 +36,31 @@ def test_normalize_outline_items_adds_ids_and_statuses():
             "status": "planned",
         },
     ]
+
+
+def test_chapter_outline_import_ignores_freeform_sections():
+    content = """# 大纲
+
+## 卷二：三千年的浇铸
+核心问题：协议是怎么被一代代铺出来的？
+
+### A 线：历史回溯
+- 战国末年她铸下青铜匣
+
+第 7 章：涂瑶的名字
+他通过噪声拼出第一个完整人名。
+
+## 双线推进
+这不是章节。
+
+第 X 章：厄忍现身
+厄忍揭示协议真相。
+"""
+
+    items = chapter_outline_items_from_markdown(content)
+
+    assert [item["title"] for item in items] == ["涂瑶的名字", "厄忍现身"]
+    assert items[0]["summary"] == "他通过噪声拼出第一个完整人名。"
 
 
 def test_normalize_chapter_metadata_keeps_outline_id():

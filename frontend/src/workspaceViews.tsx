@@ -26,6 +26,7 @@ export interface WorkspaceViewContext {
     error: string;
     refresh: () => void;
     save: (title: string, items: OutlineItem[]) => void | Promise<unknown>;
+    importMarkdown: () => void | Promise<unknown>;
   };
   chapters: {
     chapters: StoryChapters | null;
@@ -91,6 +92,7 @@ export const WORKSPACE_VIEW_REGISTRY: WorkspaceViewDefinition[] = [
         tools={tools}
         onRefresh={outline.refresh}
         onSave={outline.save}
+        onImportMarkdown={outline.importMarkdown}
         onOpenTool={openTool}
       />
     ),

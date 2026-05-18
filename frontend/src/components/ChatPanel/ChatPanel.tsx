@@ -117,6 +117,15 @@ function isAgentRunEvent(event: AgentEvent) {
   return event.type === "agent_run";
 }
 
+function isToolResultEvent(event: AgentEvent) {
+  return event.type === "tool_result";
+}
+
+function uiHintType(event: AgentEvent) {
+  const type = event.ui_hint?.type;
+  return typeof type === "string" ? type : "";
+}
+
 function systemStatusText(event: AgentEvent) {
   if (event.type === "agent_limit_reached") return event.content ?? "Agent 已达到本轮迭代上限。";
   if (event.type === "agent_status") return event.content ?? "Agent 正在工作";
@@ -141,6 +150,40 @@ function toolParamsText(params?: Record<string, unknown>) {
     .slice(0, 4)
     .map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`)
     .join(" · ");
+}
+
+function shortContent(content?: string, limit = 160) {
+  const text = (content ?? "").replace(/\s+/g, " ").trim();
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit).trim()}...`;
+}
+
+function uiHintItemCount(event: AgentEvent) {
+  const data = event.ui_hint?.data;
+  return Array.isArray(data) ? data.length : null;
+}
+
+function toolResultTitle(event: AgentEvent) {
+  const type = uiHintType(event);
+  if (type === "list:search_results") return "检索结果";
+  if (type === "list:issues") return "一致性检查结果";
+  if (type === "document:worldview") return "世界观文档结果";
+  if (type === "stream:editor") return "写作结果";
+  if (type === "card:character") return "角色结果";
+  if (type === "list:outline_chapters") return "大纲结果";
+  return type || "工具结果";
+}
+
+function toolResultSummary(event: AgentEvent) {
+  const type = uiHintType(event);
+  const count = uiHintItemCount(event);
+  if (type === "list:search_results") return `${count ?? 0} 条检索结果`;
+  if (type === "list:issues") return `${count ?? 0} 条一致性提示`;
+  if (type === "list:outline_chapters") return `${count ?? 0} 个大纲节点`;
+  if (type === "card:character") return "角色卡片";
+  if (type === "document:worldview") return "世界观文档";
+  if (type === "stream:editor") return "写作输出";
+  return shortContent(event.content, 96) || "点击展开查看详情";
 }
 
 function isToolStatusEvent(event: AgentEvent) {
@@ -353,6 +396,47 @@ function parseAgentTaskList(event?: AgentEvent): AgentTaskList | null {
   };
 }
 
+function fallbackTaskListFromEvents(events: AgentEvent[], activeRun?: AgentRunRecord | null): AgentTaskList | null {
+  const latest = [...events].reverse().find((event) => (
+    event.type === "agent_status" ||
+    event.type === "stream" ||
+    event.type === "tool_call_start" ||
+    event.type === "tool_call_end" ||
+    event.type === "tool_call_error" ||
+    event.type === "agent_final" ||
+    event.type === "error"
+  ));
+  if (!latest && !activeRun) return null;
+
+  const labels = ["检索上下文", "请求模型", "生成回复", "整理完成"];
+  const phase = activeRun?.phase || (typeof latest?.metadata?.phase === "string" ? latest.metadata.phase : "");
+  const status = activeRun?.status;
+  let activeIndex = 0;
+  let done = status === "completed" || latest?.type === "agent_final";
+  const hasError = status === "failed" || latest?.type === "error" || latest?.type === "tool_call_error";
+
+  if (phase === "thinking" || phase === "context_ready") activeIndex = 1;
+  if (phase === "tool_calling" || latest?.type === "stream" || latest?.type === "tool_call_start" || latest?.type === "tool_call_end") activeIndex = 2;
+  if (phase === "finalizing" || phase === "done" || status === "completed" || latest?.type === "agent_final") activeIndex = 3;
+  if (status === "interrupted" || phase === "interrupted" || phase === "interrupt_requested") {
+    activeIndex = 3;
+    done = true;
+  }
+
+  const tasks = labels.map((label, index) => {
+    let itemStatus: AgentTaskItem["status"] = index < activeIndex ? "done" : index === activeIndex ? "active" : "pending";
+    if (done) itemStatus = "done";
+    if (hasError && index === activeIndex) itemStatus = "error";
+    return { label, status: itemStatus };
+  });
+
+  return {
+    tasks,
+    activeLabel: done ? "任务已完成" : hasError ? "任务失败" : labels[activeIndex],
+    done,
+  };
+}
+
 function runStatusLabel(run: AgentRunRecord) {
   if (run.status === "running") return run.phase_label || "运行中";
   if (run.status === "completed") return "已完成";
@@ -440,14 +524,21 @@ export default function ChatPanel({
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedMessageIndexes, setSelectedMessageIndexes] = useState<Set<number>>(() => new Set());
   const [quoteReferences, setQuoteReferences] = useState<QuoteReference[]>([]);
+  const [expandedToolResults, setExpandedToolResults] = useState<Set<number>>(() => new Set());
+  const [lastTaskList, setLastTaskList] = useState<ReturnType<typeof parseAgentTaskList>>(null);
   const [visibleStart, setVisibleStart] = useState(0);
   const [liveStart, setLiveStart] = useState(0);
   const displayEvents = useMemo(() => mergeStreamEvents(events), [events]);
   const liveEvents = useMemo(() => displayEvents.slice(liveStart), [displayEvents, liveStart]);
-  const taskList = useMemo(() => {
+  const liveTaskList = useMemo(() => {
     const latest = [...liveEvents].reverse().find(isTaskListEvent);
     return parseAgentTaskList(latest);
   }, [liveEvents]);
+  const fallbackTaskList = useMemo(
+    () => fallbackTaskListFromEvents(liveEvents, activeRun),
+    [activeRun, liveEvents],
+  );
+  const taskList = liveTaskList ?? lastTaskList ?? fallbackTaskList;
   const workState = useMemo(
     () => liveEvents.length > 0
       ? getWorkState(liveEvents, connected)
@@ -492,7 +583,12 @@ export default function ChatPanel({
     setLiveStart(displayEvents.length);
     setVisibleStart(start);
     setQuoteReferences([]);
+    setLastTaskList(null);
   }, [historyVersion]);
+
+  useEffect(() => {
+    if (liveTaskList) setLastTaskList(liveTaskList);
+  }, [liveTaskList]);
 
   useEffect(() => {
     setVisibleStart((current) => {
@@ -676,6 +772,46 @@ export default function ChatPanel({
         <MarkdownView content={event.content} />
         {isStreaming && isLast && <span className="chat-cursor" />}
       </div>
+    );
+  };
+
+  const renderToolResult = (event: AgentEvent, eventIndex: number) => {
+    const expanded = expandedToolResults.has(eventIndex);
+    const title = toolResultTitle(event);
+    const type = uiHintType(event);
+    const summary = toolResultSummary(event);
+    return (
+      <details
+        className="chat-tool-result"
+        open={expanded}
+        onToggle={(toggleEvent) => {
+          const isOpen = (toggleEvent.currentTarget as HTMLDetailsElement).open;
+          setExpandedToolResults((current) => {
+            const next = new Set(current);
+            if (isOpen) next.add(eventIndex);
+            else next.delete(eventIndex);
+            return next;
+          });
+        }}
+      >
+        <summary>
+          <span>
+            <strong>{title}</strong>
+            {type && <em>{type}</em>}
+          </span>
+          <small>{summary}</small>
+          <span className="chat-tool-result-action" aria-hidden="true">
+            {expanded ? "收起" : "展开"}
+          </span>
+        </summary>
+        <div className="chat-tool-result-body">
+          {event.ui_hint ? (
+            <AiRender {...eventToRender(event)} compact />
+          ) : event.content ? (
+            <MarkdownView content={event.content} />
+          ) : null}
+        </div>
+      </details>
     );
   };
 
@@ -890,6 +1026,13 @@ export default function ChatPanel({
           const userDisplay = isUser ? displayReferencedUserContent(event.content, event.metadata) : null;
           if (isTaskListEvent(event)) return null;
           if (isAgentRunEvent(event)) return null;
+          if (isToolResultEvent(event)) {
+            return (
+              <div key={eventIndex} className="chat-message chat-message--tool-result">
+                {renderToolResult(event, eventIndex)}
+              </div>
+            );
+          }
           if (isSystemStatus) {
             return (
               <div key={i} className="chat-message chat-message--system">

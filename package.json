@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix frontend run tauri -- build && npm run release:summary",
+    "dev": "npm --prefix frontend run tauri -- dev",
+    "build:frontend": "npm --prefix frontend run build",
+    "release:summary": "powershell -ExecutionPolicy Bypass -File scripts/release_summary.ps1",
+    "smoke:installed": "powershell -ExecutionPolicy Bypass -File scripts/smoke_installed_app.ps1"
+  }
+}

@@ -209,6 +209,12 @@
   cursor: not-allowed;
 }
 
+.settings-model-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 260px);
+  gap: var(--space-sm);
+}
+
 /* ── Textarea ── */
 
 .settings-textarea {
@@ -431,6 +437,10 @@
   }
 
   .settings-grid-2 {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-model-picker {
     grid-template-columns: 1fr;
   }
 

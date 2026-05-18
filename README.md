@@ -35,8 +35,7 @@ npm install
 启动桌面开发模式：
 
 ```powershell
-cd frontend
-npm run tauri dev
+npm run dev
 ```
 
 开发态不会打包 Python 后端，会直接从源码启动后端并启动 Vite 前端。
@@ -52,7 +51,7 @@ frontend/src-tauri/tauri.conf.json
 修改：
 
 ```json
-"version": "0.1.7"
+"version": "0.1.8"
 ```
 
 每次准备安装包或 GitHub Release 都必须递增版本号。同版本覆盖安装可能被 Windows/NSIS 视为维护安装，不能可靠验证新二进制是否已替换。
@@ -60,14 +59,12 @@ frontend/src-tauri/tauri.conf.json
 构建安装包：
 
 ```powershell
-cd frontend
-npm run tauri build
+npm run build
 ```
 
 产物位置：
 
 ```text
-frontend/src-tauri/target/release/bundle/msi/
 frontend/src-tauri/target/release/bundle/nsis/
 ```
 
@@ -122,14 +119,21 @@ cargo check
 完整打包：
 
 ```powershell
-cd frontend
-npm run tauri build
+npm run build
+```
+
+清理旧构建产物：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/clean_build_artifacts.ps1 -DryRun
+powershell -ExecutionPolicy Bypass -File scripts/clean_build_artifacts.ps1
 ```
 
 ## 当前注意事项
 
-- `npm run tauri dev` 是开发模式，不会打包后端
-- `npm run tauri build` 是发布模式，会打包前端、后端源码资源和随包 Python runtime
+- 仓库根目录 `npm run build` 是发布模式，会打包前端、后端源码资源和随包 Python runtime
+- `cd frontend && npm run build` 只构建前端网页资源，不会生成安装包
+- 仓库根目录 `npm run dev` 是开发模式，不会打包后端
 - 安装版侧栏的连接状态指 Agent WebSocket，不等同于后端是否启动
 - 没选择项目时 Agent 会显示未选择或未连接，这是正常状态
 - 中断不能强杀正在运行的工具内部逻辑，只会阻止后续 Agent 步骤

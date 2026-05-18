@@ -311,6 +311,13 @@ function App() {
               void vectorIndex.refresh();
               return result;
             },
+            importMarkdown: async () => {
+              const result = await outline.importMarkdown();
+              void overview.refresh();
+              void fileTree.refresh();
+              void vectorIndex.refresh();
+              return result;
+            },
           },
           chapters: {
             ...chapters,

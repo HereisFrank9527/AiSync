@@ -44,9 +44,27 @@ export function useOutline(projectPath: string | null) {
     }
   }, [projectPath]);
 
+  const importMarkdown = useCallback(async () => {
+    if (!projectPath) return null;
+    setLoading(true);
+    try {
+      const data = await api.post<StoryOutline>("/story/outline/import-markdown", {
+        project_path: projectPath,
+      });
+      setOutline(data);
+      setError("");
+      return data;
+    } catch {
+      setError("无法导入 Markdown 大纲");
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, [projectPath]);
+
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  return { outline, loading, error, refresh, save };
+  return { outline, loading, error, refresh, save, importMarkdown };
 }

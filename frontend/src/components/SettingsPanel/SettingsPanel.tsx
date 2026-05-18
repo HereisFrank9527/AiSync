@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { Preset, LLMParams, AgentBehavior, ToolDescriptor } from "../../types";
+import type { Preset, LLMParams, AgentBehavior, ModelListResponse, ToolDescriptor } from "../../types";
 import { checkLatestRelease, formatAssetSize, openExternalUrl, type UpdateInfo } from "../../config/updateCheck";
 import "./SettingsPanel.css";
 
@@ -18,7 +18,7 @@ interface SettingsPanelProps {
     id: string,
     data: { name?: string; llm?: LLMParams; behavior?: AgentBehavior },
   ) => Promise<Preset>;
-  onListModels: (llm: LLMParams) => Promise<{ models: string[] }>;
+  onListModels: (llm: LLMParams) => Promise<ModelListResponse>;
   onDelete: (id: string) => Promise<void>;
   isBuiltin: (id: string) => boolean;
   tools: ToolDescriptor[];
@@ -80,11 +80,12 @@ export default function SettingsPanel({
         .then((result) => {
           if (cancelled) return;
           setModelOptions(result.models);
+          if (result.error) setModelError(result.error);
         })
-        .catch(() => {
+        .catch((error) => {
           if (cancelled) return;
           setModelOptions([]);
-          setModelError("无法获取模型列表");
+          setModelError(error instanceof Error ? error.message : "无法获取模型列表");
         })
         .finally(() => {
           if (!cancelled) setModelLoading(false);
@@ -221,6 +222,22 @@ export default function SettingsPanel({
   };
 
   const preferredInstaller = updateInfo?.preferredAsset ?? null;
+
+  const refreshModels = async () => {
+    if (!llm) return;
+    setModelLoading(true);
+    setModelError("");
+    try {
+      const result = await onListModels(llm);
+      setModelOptions(result.models);
+      if (result.error) setModelError(result.error);
+    } catch (error) {
+      setModelOptions([]);
+      setModelError(error instanceof Error ? error.message : "无法获取模型列表");
+    } finally {
+      setModelLoading(false);
+    }
+  };
 
   const handleOpenInstaller = async () => {
     if (!preferredInstaller) return;
@@ -390,28 +407,32 @@ export default function SettingsPanel({
           </div>
           <div className="settings-field">
             <label>模型名称</label>
-            <input
-              value={llm.model_name}
-              onChange={(e) => patchLlm("model_name", e.target.value)}
-              disabled={readonly}
-              list="llm-model-options"
-            />
-            <datalist id="llm-model-options">
-              {modelOptions.map((model) => <option key={model} value={model} />)}
-            </datalist>
+            <div className="settings-model-picker">
+              <input
+                value={llm.model_name}
+                onChange={(e) => patchLlm("model_name", e.target.value)}
+                disabled={readonly}
+                placeholder="手动输入模型名"
+              />
+              <select
+                value={modelOptions.includes(llm.model_name) ? llm.model_name : ""}
+                onChange={(event) => event.target.value && patchLlm("model_name", event.target.value)}
+                disabled={readonly || modelOptions.length === 0}
+                title={modelOptions.length === 0 ? "暂无可选模型，请先刷新模型列表" : "从已获取模型中选择"}
+              >
+                <option value="">{modelOptions.length === 0 ? "暂无模型列表" : "选择模型"}</option>
+                {modelOptions.map((model) => <option key={model} value={model}>{model}</option>)}
+              </select>
+            </div>
             <div className="settings-field-hint">
-              <span>{modelLoading ? "自动获取模型列表中…" : modelOptions.length ? `已获取 ${modelOptions.length} 个模型` : "输入框会自动补全可用模型"}</span>
+              <span>{modelLoading ? "获取模型列表中…" : modelOptions.length ? `已获取 ${modelOptions.length} 个模型，可用右侧下拉选择` : "可手动输入模型名，或点击刷新模型拉取列表"}</span>
               <button
                 className="btn-ghost"
                 type="button"
-                onClick={() => llm && void onListModels(llm)
-                  .then((result) => {
-                    setModelOptions(result.models);
-                    setModelError("");
-                  })
-                  .catch(() => setModelError("无法获取模型列表"))}
+                onClick={() => void refreshModels()}
+                disabled={modelLoading}
               >
-                刷新模型
+                {modelLoading ? "刷新中" : "刷新模型"}
               </button>
             </div>
             {modelError && <p className="settings-msg error">{modelError}</p>}

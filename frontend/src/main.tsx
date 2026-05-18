@@ -93,7 +93,16 @@ function Bootstrap() {
   }
 
   if (!ready) {
-    return <div className="view-status view-status--loading">AiSync {APP_VERSION} 正在启动后端…</div>;
+    return (
+      <div className="app-boot-screen">
+        <div className="app-boot-card">
+          <div className="app-boot-mark">A</div>
+          <div className="app-boot-spinner" aria-hidden="true" />
+          <h1>AiSync {APP_VERSION}</h1>
+          <p>正在启动后端服务</p>
+        </div>
+      </div>
+    );
   }
 
   return <App />;

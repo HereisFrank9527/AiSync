@@ -39,7 +39,7 @@ async def create_preset(body: PresetCreate) -> Preset:
 
 
 @router.post("/models")
-async def list_models(body: LLMParams) -> dict[str, list[str]]:
+async def list_models(body: LLMParams) -> dict[str, list[str] | str]:
     api_key = body.api_key or os.getenv(body.api_key_env)
     if not api_key:
         raise HTTPException(status_code=400, detail="缺少 API Key 或可用的 API Key 环境变量")
@@ -61,6 +61,9 @@ async def list_models(body: LLMParams) -> dict[str, list[str]]:
             models = sorted(str(item.id) for item in data if getattr(item, "id", None))
             return {"models": models}
     except Exception as exc:
+        fallback = [body.model_name.strip()] if body.model_name.strip() else []
+        if fallback:
+            return {"models": fallback, "error": f"无法获取模型列表，已保留当前模型：{exc}"}
         raise HTTPException(status_code=400, detail=f"无法获取模型列表：{exc}") from exc
 
     raise HTTPException(status_code=400, detail=f"不支持的供应商：{body.provider}")

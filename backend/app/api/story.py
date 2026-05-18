@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.projects.context import ProjectContext
-from app.projects.outline import outline_items_from_markdown
+from app.projects.outline import chapter_outline_items_from_markdown, outline_items_from_markdown
 
 router = APIRouter(prefix="/story", tags=["story"])
 
@@ -25,6 +25,10 @@ class OutlineSaveRequest(BaseModel):
     project_path: str | None = None
     title: str = "大纲"
     items: list[OutlineItem] = Field(default_factory=list)
+
+
+class OutlineImportRequest(BaseModel):
+    project_path: str | None = None
 
 
 class WorldviewDocumentSaveRequest(BaseModel):
@@ -309,10 +313,11 @@ async def get_outline(project_path: str = Query(...)) -> dict[str, Any]:
         content = await context.read_text(md_path)
         return {
             "source": md_path,
-            "format": "markdown",
+            "format": "markdown_only",
             "title": "大纲",
-            "items": outline_items_from_markdown(content),
+            "items": [],
             "content": content,
+            "importable_items": chapter_outline_items_from_markdown(content),
         }
 
     return {"source": None, "format": "empty", "title": "大纲", "items": [], "content": ""}
@@ -336,6 +341,30 @@ async def save_outline(request: OutlineSaveRequest) -> dict[str, Any]:
         ),
     )
     return {"source": "plot/outline.json", "format": "json", "title": data["title"], "items": normalized_items}
+
+
+@router.post("/outline/import-markdown")
+async def import_outline_from_markdown(request: OutlineImportRequest) -> dict[str, Any]:
+    context = project_context(request.project_path)
+    md_path = "plot/outline.md"
+    if not await context.exists(md_path):
+        raise HTTPException(status_code=404, detail="plot/outline.md not found")
+    content = await context.read_text(md_path)
+    imported_items = chapter_outline_items_from_markdown(content)
+    normalized_items = normalize_outline_items([OutlineItem.model_validate(item) for item in imported_items])
+    data = {"title": "大纲", "items": normalized_items}
+    await context.write_json("plot/outline.json", data)
+    await context.write_text(
+        "plot/outline.md",
+        outline_to_markdown(data["title"], [OutlineItem.model_validate(item) for item in normalized_items]),
+    )
+    return {
+        "source": "plot/outline.json",
+        "format": "json",
+        "title": data["title"],
+        "items": normalized_items,
+        "raw_markdown_backup": content,
+    }
 
 
 @router.get("/characters")

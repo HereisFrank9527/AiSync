@@ -115,6 +115,7 @@ export interface StoryOutline {
   title: string;
   items: OutlineItem[];
   content?: string;
+  importable_items?: OutlineItem[];
   raw?: unknown;
 }
 
@@ -339,6 +340,7 @@ export interface PresetUpdate {
 
 export interface ModelListResponse {
   models: string[];
+  error?: string;
 }
 
 /* ── 工具执行结果 ── */
