@@ -19,7 +19,7 @@ export default function FileView({ path, content, onChange, onSave, saving = fal
   }, [content, path]);
 
   if (!path) {
-    return <div className="file-view-empty">选择一个 Markdown 文件开始编辑</div>;
+    return <div className="file-view-empty">选择一个 Markdown 或自由区文本文件开始编辑</div>;
   }
 
   return (

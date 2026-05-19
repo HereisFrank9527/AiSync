@@ -11,6 +11,10 @@ from app.projects.context import ProjectContext
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
+SAFE_PROJECT_FILE_EXTENSIONS = {".md", ".txt", ".json", ".yaml", ".yml", ".csv"}
+BLOCKED_PROJECT_FILE_ROOTS = {".aisync", ".vectordb"}
+RESERVED_PROJECT_FILE_PATHS = {"temp/.aisync-temp.json"}
+
 
 class FileWriteRequest(BaseModel):
     content: str
@@ -36,8 +40,47 @@ class ProjectOverviewUpdateRequest(BaseModel):
     target_characters: int | None = None
 
 
+class FileMoveRequest(BaseModel):
+    project_path: str | None = None
+    old_path: str
+    new_path: str
+
+
 def project_context(project_id: str | None = None, project_path: str | None = None) -> ProjectContext:
     return ProjectContext(settings.project_path(project_id=project_id, project_path=project_path))
+
+
+def normalize_project_relative_path(path: str) -> str:
+    normalized = path.replace("\\", "/").strip().lstrip("/")
+    if not normalized or normalized == ".":
+        raise HTTPException(status_code=400, detail="path is required")
+    parts = normalized.split("/")
+    if "\x00" in normalized or any(part in {"", ".", ".."} for part in parts):
+        raise HTTPException(status_code=400, detail="invalid path")
+    if parts[0] in BLOCKED_PROJECT_FILE_ROOTS or any(part.startswith(".") for part in parts):
+        raise HTTPException(status_code=400, detail="internal paths are not editable")
+    if normalized in RESERVED_PROJECT_FILE_PATHS:
+        raise HTTPException(status_code=400, detail="reserved project metadata file")
+    if Path(normalized).suffix.lower() not in SAFE_PROJECT_FILE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="unsupported file type")
+    return normalized
+
+
+def normalize_temp_path(path: str) -> str:
+    normalized = normalize_project_relative_path(path)
+    if normalized == "temp" or not normalized.startswith("temp/"):
+        raise HTTPException(status_code=400, detail="path must be under temp/")
+    return normalized
+
+
+def is_safe_project_file(path: str) -> bool:
+    normalized = path.replace("\\", "/").strip().lstrip("/")
+    parts = normalized.split("/")
+    if not normalized or normalized in RESERVED_PROJECT_FILE_PATHS:
+        return False
+    if parts[0] in BLOCKED_PROJECT_FILE_ROOTS or any(part.startswith(".") for part in parts):
+        return False
+    return Path(normalized).suffix.lower() in SAFE_PROJECT_FILE_EXTENSIONS
 
 
 def first_heading(content: str, fallback: str) -> str:
@@ -234,15 +277,17 @@ async def update_project_overview(request: ProjectOverviewUpdateRequest) -> dict
 @router.get("/files")
 async def list_project_files(project_path: str = Query(...)) -> dict[str, list[str]]:
     context = project_context(project_path=project_path)
-    return {"files": await context.list_files()}
+    files = [path.replace("\\", "/") for path in await context.list_files()]
+    return {"files": sorted(path for path in files if is_safe_project_file(path))}
 
 
 @router.get("/files/{file_path:path}")
 async def read_project_file(file_path: str, project_path: str = Query(...)) -> dict[str, str]:
     context = project_context(project_path=project_path)
-    if not await context.exists(file_path):
+    normalized_path = normalize_project_relative_path(file_path)
+    if not await context.exists(normalized_path):
         raise HTTPException(status_code=404, detail="File not found")
-    return {"path": file_path, "content": await context.read_text(file_path)}
+    return {"path": normalized_path, "content": await context.read_text(normalized_path)}
 
 
 @router.put("/files/{file_path:path}")
@@ -252,26 +297,57 @@ async def write_project_file(
     project_path: str | None = Query(default=None),
 ) -> dict[str, str]:
     context = project_context(project_path=project_path or request.project_path)
-    await context.write_text(file_path, request.content)
-    return {"path": file_path, "status": "written"}
+    normalized_path = normalize_project_relative_path(file_path)
+    await context.write_text(normalized_path, request.content)
+    return {"path": normalized_path, "status": "written"}
+
+
+@router.post("/files/move")
+async def move_project_file(request: FileMoveRequest) -> dict[str, str]:
+    context = project_context(project_path=request.project_path)
+    old_path = normalize_temp_path(request.old_path)
+    new_path = normalize_temp_path(request.new_path)
+    if old_path == new_path:
+        raise HTTPException(status_code=400, detail="new_path must be different from old_path")
+    try:
+        await context.move_file(old_path, new_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="source file not found") from exc
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail="target file already exists") from exc
+    return {"old_path": old_path, "path": new_path, "status": "moved"}
+
+
+@router.delete("/files/{file_path:path}")
+async def delete_project_file(file_path: str, project_path: str = Query(...)) -> dict[str, str]:
+    context = project_context(project_path=project_path)
+    normalized_path = normalize_temp_path(file_path)
+    try:
+        await context.delete_file(normalized_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="file not found") from exc
+    return {"path": normalized_path, "status": "deleted"}
 
 
 @router.get("/{project_id}/files")
 async def list_project_files_by_id(project_id: str) -> dict[str, list[str]]:
     context = project_context(project_id=project_id)
-    return {"files": await context.list_files()}
+    files = [path.replace("\\", "/") for path in await context.list_files()]
+    return {"files": sorted(path for path in files if is_safe_project_file(path))}
 
 
 @router.get("/{project_id}/files/{file_path:path}")
 async def read_project_file_by_id(project_id: str, file_path: str) -> dict[str, str]:
     context = project_context(project_id=project_id)
-    if not await context.exists(file_path):
+    normalized_path = normalize_project_relative_path(file_path)
+    if not await context.exists(normalized_path):
         raise HTTPException(status_code=404, detail="File not found")
-    return {"path": file_path, "content": await context.read_text(file_path)}
+    return {"path": normalized_path, "content": await context.read_text(normalized_path)}
 
 
 @router.put("/{project_id}/files/{file_path:path}")
 async def write_project_file_by_id(project_id: str, file_path: str, request: FileWriteRequest) -> dict[str, str]:
     context = project_context(project_id=project_id)
-    await context.write_text(file_path, request.content)
-    return {"path": file_path, "status": "written"}
+    normalized_path = normalize_project_relative_path(file_path)
+    await context.write_text(normalized_path, request.content)
+    return {"path": normalized_path, "status": "written"}

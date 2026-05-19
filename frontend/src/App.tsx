@@ -35,6 +35,14 @@ function conversationMessagesToEvents(messages: ConversationMessage[]): AgentEve
   }));
 }
 
+function encodeProjectFilePath(path: string) {
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
+function isTempTextPath(path: string) {
+  return [".md", ".txt", ".json", ".yaml", ".yml", ".csv"].some((ext) => path.toLowerCase().endsWith(ext));
+}
+
 function App() {
   const { project, setProject, selectFolder } = useProject();
   const [activeView, setActiveView] = useState<ViewId>("overview");
@@ -177,7 +185,7 @@ function App() {
     setSelectedFilePath(path);
     if (!project?.path) return;
     const response = await api.get<{ path: string; content: string }>(
-      `/projects/files/${path}?project_path=${encodeURIComponent(project.path)}`,
+      `/projects/files/${encodeProjectFilePath(path)}?project_path=${encodeURIComponent(project.path)}`,
     );
     setSelectedFileContent(response.content);
     setActiveView("files");
@@ -187,7 +195,7 @@ function App() {
     if (!project?.path || !selectedFilePath) return;
     setFileSaving(true);
     try {
-      await api.put(`/projects/files/${selectedFilePath}?project_path=${encodeURIComponent(project.path)}`, {
+      await api.put(`/projects/files/${encodeProjectFilePath(selectedFilePath)}?project_path=${encodeURIComponent(project.path)}`, {
         content: selectedFileContent,
       });
       await fileTree.refresh();
@@ -196,6 +204,75 @@ function App() {
       setFileSaving(false);
     }
   }, [fileTree.refresh, project?.path, selectedFileContent, selectedFilePath, vectorIndex.refresh]);
+
+  const normalizeTempInputPath = useCallback((value: string, baseDir = "temp/notes") => {
+    const trimmed = value.trim().replace(/\\/g, "/").replace(/^\/+/, "");
+    if (!trimmed) return "";
+    const path = trimmed.startsWith("temp/") ? trimmed : `${baseDir.replace(/\/+$/, "")}/${trimmed}`;
+    if (path.includes("\0") || path.split("/").some((part) => !part || part === "." || part === "..")) return "";
+    if (path === "temp/.aisync-temp.json" || !isTempTextPath(path)) return "";
+    return path;
+  }, []);
+
+  const handleCreateTempFile = useCallback(async (dirPath: string) => {
+    if (!project?.path) return;
+    const filename = window.prompt("新建自由区文本文件", "notes.md");
+    if (filename === null) return;
+    const path = normalizeTempInputPath(filename, dirPath);
+    if (!path) {
+      window.alert("请输入 temp/ 下的有效文本文件名：.md、.txt、.json、.yaml、.yml 或 .csv。");
+      return;
+    }
+    try {
+      await api.put(`/projects/files/${encodeProjectFilePath(path)}?project_path=${encodeURIComponent(project.path)}`, {
+        content: "",
+      });
+      await fileTree.refresh();
+      await handleOpenFile(path);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "新建文件失败");
+    }
+  }, [fileTree.refresh, handleOpenFile, normalizeTempInputPath, project?.path]);
+
+  const handleRenameTempFile = useCallback(async (oldPath: string) => {
+    if (!project?.path) return;
+    const newValue = window.prompt("重命名自由区文件", oldPath);
+    if (newValue === null) return;
+    const newPath = normalizeTempInputPath(newValue, oldPath.split("/").slice(0, -1).join("/") || "temp/notes");
+    if (!newPath) {
+      window.alert("请输入 temp/ 下的有效文本文件目标路径。");
+      return;
+    }
+    try {
+      await api.post<{ path: string }>("/projects/files/move", {
+        project_path: project.path,
+        old_path: oldPath,
+        new_path: newPath,
+      });
+      if (selectedFilePath === oldPath) {
+        setSelectedFilePath(newPath);
+      }
+      await fileTree.refresh();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "重命名失败");
+    }
+  }, [fileTree.refresh, normalizeTempInputPath, project?.path, selectedFilePath]);
+
+  const handleDeleteTempFile = useCallback(async (path: string) => {
+    if (!project?.path) return;
+    if (!window.confirm(`确定删除自由区文件？\n${path}`)) return;
+    try {
+      await api.del(`/projects/files/${encodeProjectFilePath(path)}?project_path=${encodeURIComponent(project.path)}`);
+      if (selectedFilePath === path) {
+        setSelectedFilePath(null);
+        setSelectedFileContent("");
+      }
+      await fileTree.refresh();
+      void vectorIndex.refresh();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "删除失败");
+    }
+  }, [fileTree.refresh, project?.path, selectedFilePath, vectorIndex.refresh]);
 
   return (
     <div className="app-shell">
@@ -273,7 +350,14 @@ function App() {
               </header>
               {fileTree.loading && <p className="files-muted">加载中…</p>}
               {fileTree.error && <p className="files-error">{fileTree.error}</p>}
-              <FileTree tree={fileTree.tree} activePath={selectedFilePath} onOpenFile={handleOpenFile} />
+              <FileTree
+                tree={fileTree.tree}
+                activePath={selectedFilePath}
+                onOpenFile={handleOpenFile}
+                onCreateTempFile={handleCreateTempFile}
+                onRenameTempFile={handleRenameTempFile}
+                onDeleteTempFile={handleDeleteTempFile}
+              />
             </aside>
             <div className="files-editor">
               <FileView

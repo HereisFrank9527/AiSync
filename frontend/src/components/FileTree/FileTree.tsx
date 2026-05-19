@@ -6,16 +6,32 @@ interface FileTreeProps {
   tree: FileNode[];
   activePath: string | null;
   onOpenFile: (path: string) => void;
+  onCreateTempFile?: (dirPath: string) => void;
+  onRenameTempFile?: (path: string) => void;
+  onDeleteTempFile?: (path: string) => void;
+}
+
+const TEMP_TEXT_EXTENSIONS = [".md", ".txt", ".json", ".yaml", ".yml", ".csv"];
+
+function isEditableFile(node: FileNode) {
+  if (node.path.endsWith(".md")) return true;
+  return node.zone === "temp" && TEMP_TEXT_EXTENSIONS.some((ext) => node.path.toLowerCase().endsWith(ext));
 }
 
 function TreeNode({
   node,
   activePath,
   onOpenFile,
+  onCreateTempFile,
+  onRenameTempFile,
+  onDeleteTempFile,
 }: {
   node: FileNode;
   activePath: string | null;
   onOpenFile: (path: string) => void;
+  onCreateTempFile?: (dirPath: string) => void;
+  onRenameTempFile?: (path: string) => void;
+  onDeleteTempFile?: (path: string) => void;
 }) {
   const containsActivePath = useMemo(() => {
     if (!activePath) return false;
@@ -37,11 +53,29 @@ function TreeNode({
         >
           <span className={`file-tree-arrow${expanded ? " open" : ""}`} />
           <span className="file-tree-dir-name">{node.name}</span>
+          {node.path === "temp" && <span className="file-tree-zone-badge">自由区</span>}
         </button>
+        {node.zone === "temp" && (
+          <button
+            className="file-tree-action"
+            onClick={() => onCreateTempFile?.(node.path)}
+            title={`在 ${node.path} 新建文本文件`}
+          >
+            新建
+          </button>
+        )}
         {expanded && node.children.length > 0 && (
           <div className="file-tree-dir-children">
             {node.children.map((child) => (
-              <TreeNode key={child.path} node={child} activePath={activePath} onOpenFile={onOpenFile} />
+              <TreeNode
+                key={child.path}
+                node={child}
+                activePath={activePath}
+                onOpenFile={onOpenFile}
+                onCreateTempFile={onCreateTempFile}
+                onRenameTempFile={onRenameTempFile}
+                onDeleteTempFile={onDeleteTempFile}
+              />
             ))}
           </div>
         )}
@@ -52,20 +86,36 @@ function TreeNode({
     );
   }
 
-  const editable = node.path.endsWith(".md");
+  const editable = isEditableFile(node);
   return (
-    <button
-      className={`file-tree-item${activePath === node.path ? " active" : ""}`}
-      disabled={!editable}
-      onClick={() => editable && onOpenFile(node.path)}
-      title={node.path}
-    >
-      <span className="file-tree-name">{node.name}</span>
-    </button>
+    <div className={`file-tree-row${activePath === node.path ? " active" : ""}`}>
+      <button
+        className="file-tree-item"
+        disabled={!editable}
+        onClick={() => editable && onOpenFile(node.path)}
+        title={editable ? node.path : `${node.path} 暂不支持在编辑器中打开`}
+      >
+        <span className="file-tree-name">{node.name}</span>
+        {node.zone === "temp" && <span className="file-tree-zone-dot" title="自由区文件" />}
+      </button>
+      {node.zone === "temp" && (
+        <span className="file-tree-inline-actions">
+          <button onClick={() => onRenameTempFile?.(node.path)} title="重命名">改名</button>
+          <button onClick={() => onDeleteTempFile?.(node.path)} title="删除">删除</button>
+        </span>
+      )}
+    </div>
   );
 }
 
-export default function FileTree({ tree, activePath, onOpenFile }: FileTreeProps) {
+export default function FileTree({
+  tree,
+  activePath,
+  onOpenFile,
+  onCreateTempFile,
+  onRenameTempFile,
+  onDeleteTempFile,
+}: FileTreeProps) {
   if (tree.length === 0) {
     return <div className="file-tree-empty">暂无文件</div>;
   }
@@ -73,7 +123,15 @@ export default function FileTree({ tree, activePath, onOpenFile }: FileTreeProps
   return (
     <div className="file-tree">
       {tree.map((node) => (
-        <TreeNode key={node.path} node={node} activePath={activePath} onOpenFile={onOpenFile} />
+        <TreeNode
+          key={node.path}
+          node={node}
+          activePath={activePath}
+          onOpenFile={onOpenFile}
+          onCreateTempFile={onCreateTempFile}
+          onRenameTempFile={onRenameTempFile}
+          onDeleteTempFile={onDeleteTempFile}
+        />
       ))}
     </div>
   );

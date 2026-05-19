@@ -15,7 +15,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  width: 100%;
+  width: calc(100% - 48px);
   padding: 4px var(--space-sm);
   border-radius: var(--radius-sm);
   background: transparent;
@@ -53,9 +53,40 @@
 }
 
 .file-tree-dir-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.file-tree-zone-badge {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border: 1px solid rgba(20, 122, 85, 0.28);
+  border-radius: var(--radius-sm);
+  color: #147a55;
+  background: rgba(20, 122, 85, 0.08);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.file-tree-action {
+  float: right;
+  width: 42px;
+  min-height: 24px;
+  margin-top: -26px;
+  margin-right: 2px;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+}
+
+.file-tree-action:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
 }
 
 .file-tree-dir-children {
@@ -73,7 +104,8 @@
 .file-tree-item {
   display: flex;
   align-items: center;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   min-height: 28px;
   padding: 3px var(--space-sm) 3px 32px;
   border-radius: var(--radius-sm);
@@ -82,13 +114,26 @@
   text-align: left;
 }
 
-.file-tree-item:hover:not(:disabled) {
+.file-tree-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  border-radius: var(--radius-sm);
+}
+
+.file-tree-row:hover {
   background: var(--color-bg-hover);
+}
+
+.file-tree-row:hover .file-tree-item:not(:disabled) {
   color: var(--color-text);
 }
 
-.file-tree-item.active {
+.file-tree-row.active {
   background: var(--color-bg-active);
+}
+
+.file-tree-row.active .file-tree-item {
   color: var(--color-text);
 }
 
@@ -98,8 +143,46 @@
 }
 
 .file-tree-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--font-size-sm);
+}
+
+.file-tree-zone-dot {
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: #147a55;
+}
+
+.file-tree-inline-actions {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding-right: 2px;
+}
+
+.file-tree-row:hover .file-tree-inline-actions,
+.file-tree-row:focus-within .file-tree-inline-actions {
+  display: flex;
+}
+
+.file-tree-inline-actions button {
+  min-height: 22px;
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+}
+
+.file-tree-inline-actions button:hover {
+  background: rgba(20, 122, 85, 0.1);
+  color: #147a55;
 }

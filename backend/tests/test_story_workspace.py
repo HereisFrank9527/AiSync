@@ -1,6 +1,6 @@
 import pytest
 
-from app.api.projects import build_project_overview
+from app.api.projects import build_project_overview, is_safe_project_file, normalize_project_relative_path, normalize_temp_path
 from app.api.story import (
     OutlineItem,
     normalize_chapter_metadata,
@@ -103,6 +103,65 @@ async def test_project_context_move_and_delete_file(tmp_path):
     await context.delete_file("world/new.md")
 
     assert not await context.exists("world/new.md")
+
+
+@pytest.mark.asyncio
+async def test_project_init_creates_temp_workspace(tmp_path):
+    context = ProjectContext(tmp_path)
+
+    created = await context.init_structure()
+
+    assert await context.exists("temp/inbox")
+    assert await context.exists("temp/drafts")
+    assert await context.exists("temp/exports")
+    assert await context.exists("temp/notes")
+    assert await context.exists("temp/.aisync-temp.json")
+    assert "temp/.aisync-temp.json" in created
+    metadata = await context.read_json("temp/.aisync-temp.json")
+    assert metadata["version"] == 1
+    assert metadata["items"] == []
+
+
+def test_normalize_temp_path_limits_file_operations_to_temp():
+    assert normalize_temp_path("temp/notes/a.md") == "temp/notes/a.md"
+    assert normalize_temp_path("\\temp\\drafts\\b.txt") == "temp/drafts/b.txt"
+    assert normalize_temp_path("temp/data/info.json") == "temp/data/info.json"
+
+    with pytest.raises(Exception):
+        normalize_temp_path("world/overview.md")
+
+    with pytest.raises(Exception):
+        normalize_temp_path("temp/../world/overview.md")
+
+    with pytest.raises(Exception):
+        normalize_temp_path("temp/.aisync-temp.json")
+
+    with pytest.raises(Exception):
+        normalize_temp_path("temp/scripts/run.py")
+
+    with pytest.raises(Exception):
+        normalize_temp_path("temp/bin/tool.exe")
+
+
+def test_project_file_api_allows_only_safe_text_files():
+    assert normalize_project_relative_path("world/overview.md") == "world/overview.md"
+    assert normalize_project_relative_path("plot/outline.json") == "plot/outline.json"
+    assert normalize_project_relative_path("temp/notes/free.txt") == "temp/notes/free.txt"
+    assert is_safe_project_file("chapters/vol-01/ch-001.md")
+    assert is_safe_project_file("temp/exports/table.csv")
+
+    for path in [
+        ".aisync/conversations/a.json",
+        ".vectordb/chroma/data.json",
+        "temp/.aisync-temp.json",
+        "temp/scripts/run.py",
+        "temp/bin/tool.exe",
+        "assets/image.png",
+        "world/.secret.md",
+    ]:
+        assert not is_safe_project_file(path)
+        with pytest.raises(Exception):
+            normalize_project_relative_path(path)
 
 
 @pytest.mark.asyncio

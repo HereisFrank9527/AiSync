@@ -141,6 +141,8 @@ powershell -ExecutionPolicy Bypass -File scripts/clean_build_artifacts.ps1
 
 ## 许可说明
 
-AiSync 不是开源许可下的自由软件。仓库代码和产物默认仅供内部评估、个人测试和已获授权的使用场景。
+AiSync 采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。
 
-如需商用、分发、二次发布或嵌入到其他产品，请先取得明确书面许可。未经许可，不授予商用权利。
+仓库代码和产物可用于非商用的个人学习、研究、测试和评估。商用、付费分发、二次发布、转售、嵌入商业产品或服务、作为托管/代运营服务提供，均需先取得明确书面许可。
+
+第三方依赖仍遵循其各自许可证。

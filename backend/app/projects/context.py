@@ -93,6 +93,10 @@ class ProjectContext:
             "plot/arcs",
             "chapters/vol-01",
             "assets",
+            "temp/inbox",
+            "temp/drafts",
+            "temp/exports",
+            "temp/notes",
             ".aisync/conversations",
         ]
         for d in dirs:
@@ -121,6 +125,15 @@ class ProjectContext:
             "plot/timeline.json": "[]\n",
             "assets/name-dictionary.yaml": "# 命名词典\n",
             "assets/style-guide.md": "# 风格指南\n\n",
+            "temp/.aisync-temp.json": json.dumps(
+                {
+                    "version": 1,
+                    "items": [],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
             "operation.log": "",
         }
 
