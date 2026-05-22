@@ -106,7 +106,7 @@ function memoryStatusText(event: AgentEvent) {
 }
 
 function isSystemStatusEvent(event: AgentEvent) {
-  return event.type === "memory_status" || event.type === "agent_limit_reached" || event.type === "agent_status";
+  return event.type === "memory_status" || event.type === "agent_limit_reached" || event.type === "agent_status" || event.type === "prompt_audit";
 }
 
 function isTaskListEvent(event: AgentEvent) {
@@ -115,6 +115,10 @@ function isTaskListEvent(event: AgentEvent) {
 
 function isAgentRunEvent(event: AgentEvent) {
   return event.type === "agent_run";
+}
+
+function isPromptAuditEvent(event: AgentEvent) {
+  return event.type === "prompt_audit";
 }
 
 function isToolResultEvent(event: AgentEvent) {
@@ -129,6 +133,7 @@ function uiHintType(event: AgentEvent) {
 function systemStatusText(event: AgentEvent) {
   if (event.type === "agent_limit_reached") return event.content ?? "Agent 已达到本轮迭代上限。";
   if (event.type === "agent_status") return event.content ?? "Agent 正在工作";
+  if (event.type === "prompt_audit") return event.content ?? "提示词来源已记录";
   return memoryStatusText(event);
 }
 
@@ -263,6 +268,24 @@ function isSelectableMessage(event: AgentEvent) {
   if (!event.content?.trim()) return false;
   if (event.sender === "user" && event.type === "user_message") return true;
   return event.type === "agent_final" || event.type === "stream";
+}
+
+function promptAuditItems(run: AgentRunRecord) {
+  const audit = run.prompt_audit;
+  if (!audit || Object.keys(audit).length === 0) return [];
+  const items: string[] = [];
+  const systemSource = audit.system_prompt?.source;
+  if (systemSource) items.push(systemSource === "preset" ? "System: 预设" : "System: 默认");
+  if (typeof audit.memory?.recent_messages === "number") {
+    items.push(`记忆: ${audit.memory.recent_messages} 条${audit.memory.summary ? " + 摘要" : ""}`);
+  }
+  if (typeof audit.vector_context?.count === "number") items.push(`向量: ${audit.vector_context.count} 条`);
+  if (audit.foreshadow_context?.included) items.push("伏笔: 已注入");
+  if (typeof audit.prompt_packs?.count === "number" && audit.prompt_packs.count > 0) {
+    items.push(`提示词: ${audit.prompt_packs.count} 个`);
+  }
+  if (typeof audit.tools?.count === "number") items.push(`工具: ${audit.tools.count} 个`);
+  return items;
 }
 
 function messageRoleLabel(event: AgentEvent) {
@@ -404,7 +427,8 @@ function fallbackTaskListFromEvents(events: AgentEvent[], activeRun?: AgentRunRe
     event.type === "tool_call_end" ||
     event.type === "tool_call_error" ||
     event.type === "agent_final" ||
-    event.type === "error"
+    event.type === "error" ||
+    event.type === "prompt_audit"
   ));
   if (!latest && !activeRun) return null;
 
@@ -925,6 +949,11 @@ export default function ChatPanel({
                   ))}
                 </div>
               )}
+              {promptAuditItems(activeRun).length > 0 && (
+                <div className="chat-run-report-audit">
+                  {promptAuditItems(activeRun).map((item) => <span key={item}>{item}</span>)}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -950,6 +979,11 @@ export default function ChatPanel({
                     {tool.name ?? "unknown"} · {tool.status ?? "completed"}{typeof tool.duration_ms === "number" ? ` · ${tool.duration_ms}ms` : ""}
                   </span>
                 ))}
+              </div>
+            )}
+            {promptAuditItems(activeRun).length > 0 && (
+              <div className="chat-run-report-audit">
+                {promptAuditItems(activeRun).map((item) => <span key={item}>{item}</span>)}
               </div>
             )}
           </div>

@@ -7,10 +7,12 @@ from app.api.agent import router as agent_router
 from app.api.config import router as config_router
 from app.api.conversations import router as conversations_router
 from app.api.presets import router as presets_router
+from app.api.prompt_packs import router as prompt_packs_router
 from app.api.projects import router as projects_router
 from app.api.story import router as story_router
 from app.api.tools import router as tools_router
 from app.api.vector import router as vector_router
+from app.api.workflows import router as workflows_router
 from app.core.config import settings
 
 
@@ -28,8 +30,10 @@ def create_app() -> FastAPI:
     app.include_router(config_router, prefix="/api")
     app.include_router(conversations_router, prefix="/api")
     app.include_router(presets_router, prefix="/api")
+    app.include_router(prompt_packs_router, prefix="/api")
     app.include_router(tools_router, prefix="/api")
     app.include_router(vector_router, prefix="/api")
+    app.include_router(workflows_router, prefix="/api")
     app.include_router(story_router, prefix="/api")
 
     @app.get("/health")

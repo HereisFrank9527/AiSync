@@ -1,9 +1,12 @@
-# ===== Python =====
+# Claude Code ignore file for AiSync
+# Keep source, configs, lockfiles, and project docs visible; hide generated/runtime/heavy files.
+
+# ===== Python caches / build =====
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 *.egg-info/
-*.egg
 .eggs/
 .pytest_cache/
 .ruff_cache/
@@ -14,21 +17,15 @@ dist/
 build/
 *.whl
 
-# Virtual environments
+# ===== Virtual environments =====
 .conda/
 .venv/
 venv/
 env/
 
-# Environment variables (secrets)
-.env
-.env.local
-.env.*.local
-!.env.example
-
-# ===== Node.js / frontend =====
+# ===== Node / Vite =====
 node_modules/
-frontend/node_modules/
+**/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/.turbo/
@@ -39,9 +36,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# ===== Rust / Tauri =====
+# ===== Rust / Tauri generated =====
 target/
-frontend/src-tauri/target/
+**/target/
 frontend/src-tauri/gen/
 frontend/src-tauri/.tauri/
 frontend/src-tauri/Cargo.lock.tmp
@@ -51,7 +48,33 @@ frontend/src-tauri/resources/backend-src/
 frontend/src-tauri/resources/runtime/
 .runtime-cache/
 
-# ===== IDE / Editor =====
+# ===== App runtime / user projects =====
+presets.json
+backend/presets.json
+projects/
+backend/projects/
+**/.aisync/
+**/.vectordb/
+chroma/
+*.log
+operation.log
+*.sqlite
+*.sqlite3
+*.db
+
+# ===== Secrets / local env =====
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+credentials*.json
+secrets*.json
+
+# ===== Editor / OS =====
 .vscode/
 .idea/
 *.swp
@@ -60,28 +83,5 @@ frontend/src-tauri/resources/runtime/
 .DS_Store
 Thumbs.db
 
-# ===== Project runtime =====
-presets.json
-backend/presets.json
-projects/*/
-backend/projects/*/
-!projects/.gitkeep
-!backend/projects/.gitkeep
-*.log
-operation.log
-*.sqlite
-*.sqlite3
-*.db
-*.local.md
-项目.local.md
-
-# ===== Vector DB =====
-.vectordb/
-**/.vectordb/
-chroma/
-
-# ===== Claude Code =====
+# ===== Claude/transcript local state =====
 .claude/
-
-.claudeignore
-示例项目

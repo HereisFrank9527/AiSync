@@ -178,9 +178,17 @@ async def invoke_tool(name: str, request: ToolInvokeRequest) -> ToolRunRecord:
         agent = await get_agent(request.project_id, effective_preset_id, request.project_path)
         result = await tool.invoke(request.params, context, agent.llm)
         if result is None:
-            prompt = tool.build_prompt(request.params)
+            build_project_prompt = getattr(tool, "build_project_prompt", None)
+            if callable(build_project_prompt):
+                prompt = await build_project_prompt(request.params, context)
+            else:
+                prompt = tool.build_prompt(request.params)
             content = await agent.run(prompt)
-            result = ToolResult(content=content, metadata={"mode": "invoke"})
+            metadata: dict[str, Any] = {"mode": "invoke"}
+            prompt_packs = await tool.project_prompt_pack_metadata(context)
+            if prompt_packs is not None:
+                metadata["prompt_packs"] = prompt_packs
+            result = ToolResult(content=content, metadata=metadata)
         record = ToolRunRecord(
             run_id=run_id,
             tool_name=name,

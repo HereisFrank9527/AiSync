@@ -17,6 +17,19 @@ def test_agent_run_lifecycle(tmp_path):
     assert with_tool.tool_calls[0]["name"] == "write_chapter"
     assert with_tool.tool_calls[0]["duration_ms"] == 42
 
+    with_audit = store.update_prompt_audit(
+        run.run_id,
+        {
+            "system_prompt": {"source": "default", "chars": 120},
+            "memory": {"summary": True, "recent_messages": 6},
+            "vector_context": {"count": 3, "paths": ["world/overview.md"]},
+            "foreshadow_context": {"included": False, "chars": 0},
+            "tools": {"mode": "runtime_override", "count": 2, "names": ["search_project"]},
+        },
+    )
+    assert with_audit.prompt_audit["system_prompt"]["source"] == "default"
+    assert with_audit.prompt_audit["vector_context"]["count"] == 3
+
     finished = store.finish(run.run_id, "completed")
     assert finished.status == "completed"
     assert finished.finished_at is not None

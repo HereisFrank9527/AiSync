@@ -1,4 +1,4 @@
-import { Component, StrictMode, useEffect, useState, type ErrorInfo, type ReactNode } from "react";
+import { Component, StrictMode, useEffect, useMemo, useState, type ErrorInfo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import App from "./App";
@@ -38,6 +38,14 @@ function writeFrontendDiagnostics(message: string) {
   }).catch(() => undefined);
 }
 
+const BOOT_MESSAGES = [
+  "准备本地运行环境",
+  "选择后端服务端口",
+  "启动写作服务",
+  "等待健康检查",
+  "整理工作区入口",
+];
+
 class BootErrorBoundary extends Component<{ children: ReactNode }, { error: unknown }> {
   state = { error: null as unknown };
 
@@ -67,6 +75,8 @@ class BootErrorBoundary extends Component<{ children: ReactNode }, { error: unkn
 function Bootstrap() {
   const [ready, setReady] = useState(!isTauri());
   const [error, setError] = useState<string | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -88,6 +98,40 @@ function Bootstrap() {
     };
   }, []);
 
+  useEffect(() => {
+    if (ready || error) return undefined;
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [error, ready]);
+
+  const bootMessage = useMemo(() => {
+    return BOOT_MESSAGES[Math.floor(elapsedSeconds / 2) % BOOT_MESSAGES.length];
+  }, [elapsedSeconds]);
+
+  const copyDiagnostics = async () => {
+    if (!isTauri()) return;
+    try {
+      const diagnostics = await invoke<string>("backend_diagnostics");
+      await navigator.clipboard.writeText(diagnostics);
+      setDiagnosticsCopied(true);
+      window.setTimeout(() => setDiagnosticsCopied(false), 1800);
+    } catch (error) {
+      setError(`复制诊断信息失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const openLogs = async () => {
+    if (!isTauri()) return;
+    try {
+      await invoke("open_log_dir");
+    } catch (error) {
+      setError(`打开日志目录失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   if (error) {
     return <div className="view-status view-status--error">后端启动失败：{error}</div>;
   }
@@ -99,7 +143,18 @@ function Bootstrap() {
           <div className="app-boot-mark">A</div>
           <div className="app-boot-spinner" aria-hidden="true" />
           <h1>AiSync {APP_VERSION}</h1>
-          <p>正在启动后端服务</p>
+          <p>{bootMessage}</p>
+          <p className="app-boot-subtext">正在启动后端服务，已等待 {elapsedSeconds} 秒</p>
+          {elapsedSeconds >= 8 && (
+            <div className="app-boot-actions">
+              <button className="btn-secondary" onClick={() => void copyDiagnostics()}>
+                {diagnosticsCopied ? "已复制" : "复制诊断"}
+              </button>
+              <button className="btn-secondary" onClick={() => void openLogs()}>
+                打开日志
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );

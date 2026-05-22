@@ -16,6 +16,7 @@ const PRIMARY_NAV_ITEMS: { id: ViewId; label: string }[] = [
   { id: "chat", label: "对话" },
   { id: "files", label: "文件" },
   { id: "vector", label: "索引" },
+  { id: "workflows", label: "工作流" },
   { id: "tools", label: "工具中心" },
   { id: "settings", label: "设置" },
 ];

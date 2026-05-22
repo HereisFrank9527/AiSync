@@ -85,10 +85,11 @@ body {
 }
 
 .app-boot-card {
-  width: min(320px, calc(100vw - 48px));
+  width: min(360px, calc(100vw - 48px));
   display: grid;
   justify-items: center;
   gap: var(--space-md);
+  text-align: center;
 }
 
 .app-boot-mark {
@@ -121,6 +122,23 @@ body {
   margin: 0;
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
+}
+
+.app-boot-subtext {
+  min-height: 20px;
+  color: var(--color-text-tertiary) !important;
+}
+
+.app-boot-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+
+.app-boot-actions .btn-secondary {
+  min-width: 86px;
 }
 
 @keyframes app-boot-spin {

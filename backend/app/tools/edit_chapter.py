@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.prompt_packs import PromptPackStage
 from app.projects.context import ProjectContext
 from app.tools.base import BaseTool, ToolFileAccess, ToolPresentation, ToolResult
 
@@ -18,6 +19,9 @@ class EditChapterTool(BaseTool):
 
     def presentation(self) -> ToolPresentation:
         return ToolPresentation(type="stream:editor", description="章节编辑器预览")
+
+    def prompt_pack_stages(self) -> list[PromptPackStage]:
+        return ["revision"]
 
     def schema(self) -> dict[str, Any]:
         return {
@@ -40,11 +44,24 @@ class EditChapterTool(BaseTool):
         path = str(params.get("path") or "")
         mode = str(params.get("mode") or "replace")
         content = str(params.get("content") or "").strip()
+        prompt_pack_block = self.prompt_pack_block()
+        return self._build_prompt_text(path, mode, content, prompt_pack_block)
+
+    async def build_project_prompt(self, params: dict[str, Any], context: ProjectContext) -> str:
+        path = str(params.get("path") or "")
+        mode = str(params.get("mode") or "replace")
+        content = str(params.get("content") or "").strip()
+        prompt_pack_block = await self.project_prompt_pack_block(context)
+        return self._build_prompt_text(path, mode, content, prompt_pack_block)
+
+    def _build_prompt_text(self, path: str, mode: str, content: str, prompt_pack_block: str) -> str:
+        prompt_pack_section = f"\n\n{prompt_pack_block}\n" if prompt_pack_block else "\n"
         return (
             "请根据当前项目设定编辑章节，并调用 `edit_chapter` 工具写回章节文件。\n"
             f"目标章节路径：{path or '请从用户要求判断'}\n"
             f"应用方式：{mode}\n"
             f"编辑要求或草稿：{content or '按当前章节内容、项目上下文和用户要求修改。'}\n"
+            f"{prompt_pack_section}"
             "请检查 plot/foreshadows.json：如果目标章节是某个伏笔的埋设/回收章节，或关联同一大纲节点，"
             "修改时应保持伏笔状态一致；不要主动使用已废弃伏笔。"
         )

@@ -1,6 +1,6 @@
 /* ── 视图类型 ── */
 
-export type ViewId = "overview" | "chat" | "chapters" | "outline" | "foreshadows" | "characters" | "worldview" | "vector" | "tools" | "settings" | "files";
+export type ViewId = "overview" | "chat" | "chapters" | "outline" | "foreshadows" | "characters" | "worldview" | "vector" | "workflows" | "tools" | "settings" | "files";
 
 export interface ProjectInfo {
   name: string;
@@ -55,6 +55,38 @@ export interface AgentRunRecord {
   enabled_tools: string[] | null;
   input_preview: string;
   error: string | null;
+  prompt_audit?: {
+    system_prompt?: {
+      source?: string;
+      chars?: number;
+    };
+    user_input?: {
+      chars?: number;
+    };
+    memory?: {
+      summary?: boolean;
+      summary_chars?: number;
+      recent_messages?: number;
+    };
+    vector_context?: {
+      count?: number;
+      paths?: string[];
+    };
+    foreshadow_context?: {
+      included?: boolean;
+      chars?: number;
+    };
+    prompt_packs?: {
+      stage?: string;
+      count?: number;
+      names?: string[];
+    };
+    tools?: {
+      mode?: string;
+      count?: number;
+      names?: string[];
+    };
+  };
   tool_calls: Array<{
     name?: string;
     status?: string;
@@ -341,6 +373,89 @@ export interface PresetUpdate {
 export interface ModelListResponse {
   models: string[];
   error?: string;
+}
+
+export type PromptPackCategory = "style" | "writing" | "planning" | "revision" | "check" | "special" | "custom";
+export type PromptPackStage = "chat" | "chapter_plan" | "chapter_draft" | "revision" | "check" | "special";
+export type PromptPackScope = "global" | "project";
+
+export interface PromptPack {
+  id: string;
+  name: string;
+  category: PromptPackCategory;
+  scope: PromptPackScope;
+  stages: PromptPackStage[];
+  content: string;
+  enabled: boolean;
+  description: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PromptPackCreate {
+  name: string;
+  category?: PromptPackCategory;
+  scope?: PromptPackScope;
+  stages?: PromptPackStage[];
+  content?: string;
+  enabled?: boolean;
+  description?: string;
+}
+
+export type PromptPackUpdate = Partial<PromptPackCreate>;
+
+export interface ProjectPromptPackSettings {
+  mode: "global" | "project";
+  enabled_pack_ids: string[];
+}
+
+/* ── 工作流 ── */
+
+export type WorkflowRunStatus = "draft" | "running" | "paused" | "completed" | "failed" | "cancelled";
+export type WorkflowStepStatus = "pending" | "running" | "waiting_user" | "completed" | "failed" | "skipped";
+export type WorkflowStepKind = "plan" | "context" | "draft" | "revise" | "check" | "write_file" | "user_confirm" | "custom";
+
+export interface WorkflowStepRecord {
+  step_id: string;
+  name: string;
+  kind: WorkflowStepKind;
+  status: WorkflowStepStatus;
+  preset_id: string | null;
+  prompt_pack_ids: string[];
+  context_pack_ids: string[];
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
+  output_path: string | null;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  updated_at: string;
+}
+
+export interface WorkflowRunRecord {
+  run_id: string;
+  workflow_type: string;
+  title: string;
+  status: WorkflowRunStatus;
+  current_step_id: string | null;
+  conversation_id: string | null;
+  agent_run_id: string | null;
+  input_summary: string;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+  steps: WorkflowStepRecord[];
+  metadata: Record<string, unknown>;
+}
+
+export interface WorkflowRunCreate {
+  workflow_type?: string;
+  title: string;
+  input_summary?: string;
+  conversation_id?: string | null;
+  agent_run_id?: string | null;
+  steps?: Array<Partial<WorkflowStepRecord> & { name: string }>;
+  metadata?: Record<string, unknown>;
 }
 
 /* ── 工具执行结果 ── */

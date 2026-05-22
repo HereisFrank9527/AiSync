@@ -1,11 +1,28 @@
 import { useEffect, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { Preset, LLMParams, AgentBehavior, ModelListResponse, ToolDescriptor } from "../../types";
+import type { Preset, LLMParams, AgentBehavior, ModelListResponse, ToolDescriptor, ProjectPromptPackSettings, PromptPack, PromptPackCategory, PromptPackScope, PromptPackStage } from "../../types";
 import { checkLatestRelease, formatAssetSize, openExternalUrl, type UpdateInfo } from "../../config/updateCheck";
 import "./SettingsPanel.css";
 
 const PROVIDERS = ["anthropic", "openai", "custom"] as const;
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+const PROMPT_CATEGORIES: Array<{ id: PromptPackCategory; label: string }> = [
+  { id: "style", label: "文风" },
+  { id: "writing", label: "写作" },
+  { id: "planning", label: "规划" },
+  { id: "revision", label: "润色" },
+  { id: "check", label: "检查" },
+  { id: "special", label: "特殊片段" },
+  { id: "custom", label: "自定义" },
+];
+const PROMPT_STAGES: Array<{ id: PromptPackStage; label: string }> = [
+  { id: "chat", label: "对话" },
+  { id: "chapter_plan", label: "章节规划" },
+  { id: "chapter_draft", label: "章节草稿" },
+  { id: "revision", label: "润色" },
+  { id: "check", label: "检查" },
+  { id: "special", label: "特殊片段" },
+];
 
 interface SettingsPanelProps {
   presets: Preset[];
@@ -22,6 +39,33 @@ interface SettingsPanelProps {
   onDelete: (id: string) => Promise<void>;
   isBuiltin: (id: string) => boolean;
   tools: ToolDescriptor[];
+  promptPacks: {
+    packs: PromptPack[];
+    projectSettings: ProjectPromptPackSettings;
+    loading: boolean;
+    error: string;
+    create: (data: {
+      name: string;
+      category?: PromptPackCategory;
+      scope?: PromptPackScope;
+      stages?: PromptPackStage[];
+      content?: string;
+      enabled?: boolean;
+      description?: string;
+    }) => Promise<PromptPack>;
+    update: (id: string, data: Partial<{
+      name: string;
+      category: PromptPackCategory;
+      scope: PromptPackScope;
+      stages: PromptPackStage[];
+      content: string;
+      enabled: boolean;
+      description: string;
+    }>) => Promise<PromptPack>;
+    copy: (id: string, name?: string | null) => Promise<PromptPack>;
+    remove: (id: string) => Promise<void>;
+    updateProjectSettings: (settings: ProjectPromptPackSettings) => Promise<ProjectPromptPackSettings>;
+  };
 }
 
 export default function SettingsPanel({
@@ -36,6 +80,7 @@ export default function SettingsPanel({
   onDelete,
   isBuiltin,
   tools,
+  promptPacks,
 }: SettingsPanelProps) {
   const [llm, setLlm] = useState<LLMParams | null>(null);
   const [behavior, setBehavior] = useState<AgentBehavior | null>(null);
@@ -56,6 +101,8 @@ export default function SettingsPanel({
   const [diagnostics, setDiagnostics] = useState("");
   const [diagnosticsMessage, setDiagnosticsMessage] = useState("");
   const [activeSectionId, setActiveSectionId] = useState("profile");
+  const [activePromptPackId, setActivePromptPackId] = useState<string | null>(null);
+  const [promptDraft, setPromptDraft] = useState<PromptPack | null>(null);
 
   useEffect(() => {
     if (!activePreset) return;
@@ -96,6 +143,13 @@ export default function SettingsPanel({
       window.clearTimeout(timer);
     };
   }, [llm?.provider, llm?.api_key, llm?.api_key_env, llm?.api_base, onListModels]);
+
+  useEffect(() => {
+    if (promptPacks.loading) return;
+    const target = promptPacks.packs.find((pack) => pack.id === activePromptPackId) ?? promptPacks.packs[0] ?? null;
+    setActivePromptPackId(target?.id ?? null);
+    setPromptDraft(target ? { ...target, stages: [...target.stages] } : null);
+  }, [activePromptPackId, promptPacks.loading, promptPacks.packs]);
 
   if (!activePreset || !llm || !behavior) {
     return <p className="settings-loading">加载配置中…</p>;
@@ -289,6 +343,106 @@ export default function SettingsPanel({
     } catch (error) {
       setDiagnosticsMessage(`打开日志目录失败：${error instanceof Error ? error.message : String(error)}`);
     }
+  };
+
+  const handleCreatePromptPack = async () => {
+    try {
+      const pack = await promptPacks.create({
+        name: "新的提示词",
+        category: "style",
+        scope: "global",
+        stages: ["chat", "chapter_draft"],
+        content: "在这里写入可复用的文风、写作规则或特殊要求。",
+        enabled: true,
+        description: "",
+      });
+      setActivePromptPackId(pack.id);
+      setPromptDraft(pack);
+    } catch {
+      setIsError(true);
+      setMessage("创建提示词失败");
+    }
+  };
+
+  const handleSavePromptPack = async () => {
+    if (!promptDraft) return;
+    try {
+      const pack = await promptPacks.update(promptDraft.id, {
+        name: promptDraft.name,
+        category: promptDraft.category,
+        scope: promptDraft.scope,
+        stages: promptDraft.stages,
+        content: promptDraft.content,
+        enabled: promptDraft.enabled,
+        description: promptDraft.description,
+      });
+      setPromptDraft(pack);
+      setIsError(false);
+      setMessage("提示词已保存");
+      setTimeout(() => setMessage(""), 3000);
+    } catch {
+      setIsError(true);
+      setMessage("保存提示词失败");
+    }
+  };
+
+  const handleCopyPromptPack = async () => {
+    if (!promptDraft) return;
+    try {
+      const pack = await promptPacks.copy(promptDraft.id, `${promptDraft.name} 副本`);
+      setActivePromptPackId(pack.id);
+      setPromptDraft(pack);
+    } catch {
+      setIsError(true);
+      setMessage("复制提示词失败");
+    }
+  };
+
+  const handleDeletePromptPack = async () => {
+    if (!promptDraft) return;
+    if (!window.confirm(`确定删除提示词「${promptDraft.name}」？`)) return;
+    try {
+      await promptPacks.remove(promptDraft.id);
+      setActivePromptPackId(null);
+      setPromptDraft(null);
+    } catch {
+      setIsError(true);
+      setMessage("删除提示词失败");
+    }
+  };
+
+  const patchPromptDraft = <K extends keyof PromptPack>(key: K, value: PromptPack[K]) => {
+    setPromptDraft((current) => current ? { ...current, [key]: value } : current);
+  };
+
+  const togglePromptStage = (stage: PromptPackStage, checked: boolean) => {
+    setPromptDraft((current) => {
+      if (!current) return current;
+      const next = checked
+        ? Array.from(new Set([...current.stages, stage]))
+        : current.stages.filter((item) => item !== stage);
+      return { ...current, stages: next.length ? next : ["chat"] };
+    });
+  };
+
+  const updateProjectPromptSettings = async (settings: ProjectPromptPackSettings) => {
+    try {
+      await promptPacks.updateProjectSettings(settings);
+      setIsError(false);
+      setMessage("项目提示词设置已保存");
+      setTimeout(() => setMessage(""), 3000);
+    } catch {
+      setIsError(true);
+      setMessage("保存项目提示词设置失败");
+    }
+  };
+
+  const toggleProjectPromptPack = (packId: string, checked: boolean) => {
+    const current = promptPacks.projectSettings.enabled_pack_ids;
+    const next = checked
+      ? Array.from(new Set([...current, packId]))
+      : current.filter((id) => id !== packId);
+    void updateProjectPromptSettings({ ...promptPacks.projectSettings, mode: "project", enabled_pack_ids: next });
   };
 
   const canSaveSection = ["profile", "llm", "agent"].includes(activeSectionId);
@@ -512,6 +666,158 @@ export default function SettingsPanel({
             )}
           </div>
         </>
+      ),
+    },
+    {
+      id: "prompts",
+      title: "提示词管理",
+      description: "维护可复用的文风、写作规则、检查规则和特殊片段提示词。",
+      body: (
+        <div className="settings-prompt-manager">
+          <div className="settings-prompt-sidebar">
+            <div className="settings-prompt-actions">
+              <button className="btn-primary" onClick={() => void handleCreatePromptPack()}>新建提示词</button>
+            </div>
+            <div className="settings-project-prompts">
+              <strong>当前项目使用方式</strong>
+              <label className="settings-radio">
+                <input
+                  type="radio"
+                  checked={promptPacks.projectSettings.mode === "global"}
+                  onChange={() => void updateProjectPromptSettings({ ...promptPacks.projectSettings, mode: "global" })}
+                />
+                沿用全局启用
+              </label>
+              <label className="settings-radio">
+                <input
+                  type="radio"
+                  checked={promptPacks.projectSettings.mode === "project"}
+                  onChange={() => void updateProjectPromptSettings({ ...promptPacks.projectSettings, mode: "project" })}
+                />
+                只使用本项目勾选项
+              </label>
+              <span>
+                {promptPacks.projectSettings.mode === "project"
+                  ? `已为本项目选择 ${promptPacks.projectSettings.enabled_pack_ids.length} 个提示词`
+                  : "所有已启用提示词会按阶段自动生效"}
+              </span>
+            </div>
+            {promptPacks.loading && <p className="settings-hint">加载提示词中…</p>}
+            {promptPacks.error && <p className="settings-msg error">{promptPacks.error}</p>}
+            {!promptPacks.loading && promptPacks.packs.length === 0 && (
+              <p className="settings-hint">还没有提示词。可以先新建一个“文风”提示词。</p>
+            )}
+            <div className="settings-prompt-list">
+              {promptPacks.packs.map((pack) => (
+                <button
+                  key={pack.id}
+                  className={pack.id === activePromptPackId ? "active" : ""}
+                  onClick={() => {
+                    setActivePromptPackId(pack.id);
+                    setPromptDraft({ ...pack, stages: [...pack.stages] });
+                  }}
+                >
+                  <strong>{pack.name}</strong>
+                  <span>{PROMPT_CATEGORIES.find((item) => item.id === pack.category)?.label ?? pack.category} · {pack.enabled ? "启用" : "停用"}</span>
+                  {promptPacks.projectSettings.mode === "project" && (
+                    <em>{promptPacks.projectSettings.enabled_pack_ids.includes(pack.id) ? "本项目使用" : "本项目未选"}</em>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="settings-prompt-editor">
+            {promptDraft ? (
+              <>
+                <div className="settings-grid-2">
+                  <div className="settings-field">
+                    <label>名称</label>
+                    <input value={promptDraft.name} onChange={(event) => patchPromptDraft("name", event.target.value)} />
+                  </div>
+                  <div className="settings-field">
+                    <label>分类</label>
+                    <select value={promptDraft.category} onChange={(event) => patchPromptDraft("category", event.target.value as PromptPackCategory)}>
+                      {PROMPT_CATEGORIES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="settings-grid-2">
+                  <div className="settings-field">
+                    <label>范围标记</label>
+                    <select value={promptDraft.scope} onChange={(event) => patchPromptDraft("scope", event.target.value as PromptPackScope)}>
+                      <option value="global">全局</option>
+                      <option value="project">项目</option>
+                    </select>
+                  </div>
+                  <div className="settings-field">
+                    <label>当前项目</label>
+                    <label className="settings-checkbox settings-project-prompt-toggle">
+                      <input
+                        type="checkbox"
+                        checked={promptPacks.projectSettings.enabled_pack_ids.includes(promptDraft.id)}
+                        onChange={(event) => toggleProjectPromptPack(promptDraft.id, event.target.checked)}
+                      />
+                      本项目使用这个提示词
+                    </label>
+                  </div>
+                </div>
+                <div className="settings-field">
+                  <label>描述</label>
+                  <input
+                    value={promptDraft.description}
+                    onChange={(event) => patchPromptDraft("description", event.target.value)}
+                    placeholder="例如：主线文风、战斗段落、伏笔检查规则"
+                  />
+                </div>
+                <label className="settings-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={promptDraft.enabled}
+                    onChange={(event) => patchPromptDraft("enabled", event.target.checked)}
+                  />
+                  启用这个提示词
+                </label>
+                <div className="settings-field">
+                  <label>适用阶段</label>
+                  <div className="settings-prompt-stage-grid">
+                    {PROMPT_STAGES.map((stage) => (
+                      <label className="settings-checkbox" key={stage.id}>
+                        <input
+                          type="checkbox"
+                          checked={promptDraft.stages.includes(stage.id)}
+                          onChange={(event) => togglePromptStage(stage.id, event.target.checked)}
+                        />
+                        {stage.label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="settings-field">
+                  <label>提示词正文</label>
+                  <textarea
+                    className="settings-textarea settings-prompt-textarea"
+                    rows={14}
+                    value={promptDraft.content}
+                    onChange={(event) => patchPromptDraft("content", event.target.value)}
+                    placeholder="写入长期可复用的文风、叙事规则、禁忌、特殊模型片段要求等。"
+                  />
+                </div>
+                <div className="settings-actions">
+                  <button className="btn-primary" onClick={() => void handleSavePromptPack()}>保存提示词</button>
+                  <button className="btn-secondary" onClick={() => void handleCopyPromptPack()}>复制</button>
+                  <button className="btn-danger" onClick={() => void handleDeletePromptPack()}>删除</button>
+                </div>
+                {message && <p className={`settings-msg${isError ? " error" : ""}`}>{message}</p>}
+              </>
+            ) : (
+              <div className="settings-empty-state">
+                <strong>选择或新建一个提示词</strong>
+                <p>这里适合保存长期文风、写作规则、章节草稿要求、润色标准和特殊片段提示词。</p>
+              </div>
+            )}
+          </div>
+        </div>
       ),
     },
     {

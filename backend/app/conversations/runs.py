@@ -29,6 +29,7 @@ class AgentRunRecord(BaseModel):
     input_preview: str = ""
     error: str | None = None
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    prompt_audit: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentRunStore:
@@ -103,6 +104,13 @@ class AgentRunStore:
                 "at": utc_now(),
             }
         )
+        record.updated_at = utc_now()
+        self.save(record)
+        return record
+
+    def update_prompt_audit(self, run_id: str, prompt_audit: dict[str, Any]) -> AgentRunRecord:
+        record = self.load(run_id)
+        record.prompt_audit = prompt_audit
         record.updated_at = utc_now()
         self.save(record)
         return record

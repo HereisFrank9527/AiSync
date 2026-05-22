@@ -5,6 +5,8 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from app.core.prompt_pack_rendering import enabled_prompt_packs_for_project_stages
+from app.core.prompt_packs import PromptPack
 from app.llm.types import ChatRequest, LLMClient, TextDeltaCallback
 from app.projects.context import ProjectContext
 from app.projects.foreshadows import foreshadow_context_for_prompt
@@ -128,6 +130,7 @@ class MasterAgent:
         self.enabled_tools = set(enabled_tools) if enabled_tools is not None else None
         self._interrupted = False
         self._running = False
+        self.last_prompt_audit: dict[str, Any] = {}
 
     async def run(
         self,
@@ -155,12 +158,29 @@ class MasterAgent:
             relevant_context = await self.vector_store.query(user_input)
             await self._push_agent_status("正在梳理相关伏笔", "retrieving_foreshadows")
             foreshadow_context = await self._foreshadow_context(user_input, task_plan)
+            prompt_packs = await enabled_prompt_packs_for_project_stages(self.project, ["chat"])
             messages = self._build_initial_messages(
                 user_input,
                 relevant_context,
                 foreshadow_context,
                 history or [],
                 memory_summary or "",
+                prompt_packs,
+            )
+            self.last_prompt_audit = self._build_prompt_audit(
+                user_input=user_input,
+                relevant_context=relevant_context,
+                foreshadow_context=foreshadow_context,
+                history=history or [],
+                memory_summary=memory_summary or "",
+                prompt_packs=prompt_packs,
+                effective_tools=effective_tools,
+                override_enabled_tools=override_enabled_tools,
+            )
+            await self._push_agent_event(
+                "prompt_audit",
+                "提示词来源已记录",
+                {"prompt_audit": self.last_prompt_audit},
             )
             await self._push_task_list(task_plan, min(1, len(task_plan) - 1), "thinking")
             context_status = (
@@ -311,9 +331,11 @@ class MasterAgent:
         foreshadow_context: str,
         history: list[dict[str, str]],
         memory_summary: str,
+        prompt_packs: list[PromptPack] | None = None,
     ) -> list[dict[str, Any]]:
         memory_messages = self._conversation_memory_messages(history)
         summary_message = self._summary_memory_message(memory_summary)
+        prompt_pack_messages = self._prompt_pack_messages(prompt_packs or [])
         context_blocks: list[str] = []
         if relevant_context:
             context_blocks.append(f"相关项目上下文：\n{self._compact_context(relevant_context)}")
@@ -326,7 +348,80 @@ class MasterAgent:
             )
         joined_context = "\n\n".join(context_blocks)
         current_content = f"{joined_context}\n\n用户请求：\n{user_input}" if joined_context else user_input
-        return [*summary_message, *memory_messages, {"role": "user", "content": current_content}]
+        return [*summary_message, *prompt_pack_messages, *memory_messages, {"role": "user", "content": current_content}]
+
+    def _prompt_pack_messages(self, prompt_packs: list[PromptPack]) -> list[dict[str, Any]]:
+        blocks = []
+        for pack in prompt_packs:
+            content = pack.content.strip()
+            if not content:
+                continue
+            header = f"提示词包：{pack.name}"
+            if pack.description.strip():
+                header += f"（{pack.description.strip()}）"
+            blocks.append(f"## {header}\n{content}")
+        if not blocks:
+            return []
+        return [
+            {
+                "role": "user",
+                "content": (
+                    "以下是已启用且适用于当前对话阶段的长期提示词规则。"
+                    "它们用于约束写作风格、输出格式和模型行为，不是项目事实设定：\n\n"
+                    + "\n\n".join(blocks)
+                ),
+            }
+        ]
+
+    def _build_prompt_audit(
+        self,
+        user_input: str,
+        relevant_context: list[dict],
+        foreshadow_context: str,
+        history: list[dict[str, str]],
+        memory_summary: str,
+        prompt_packs: list[PromptPack],
+        effective_tools: set[str] | None,
+        override_enabled_tools: bool,
+    ) -> dict[str, Any]:
+        tool_schemas = self.tools.get_schemas(effective_tools)
+        context_paths = []
+        for item in relevant_context[:8]:
+            path = item.get("path") if isinstance(item, dict) else None
+            if path:
+                context_paths.append(str(path))
+        return {
+            "system_prompt": {
+                "source": "preset" if self.system_prompt != SYSTEM_PROMPT else "default",
+                "chars": len(self.system_prompt or ""),
+            },
+            "user_input": {
+                "chars": len(user_input),
+            },
+            "memory": {
+                "summary": bool(memory_summary.strip()),
+                "summary_chars": len(memory_summary.strip()),
+                "recent_messages": len(history),
+            },
+            "vector_context": {
+                "count": len(relevant_context),
+                "paths": context_paths,
+            },
+            "foreshadow_context": {
+                "included": bool(foreshadow_context.strip()),
+                "chars": len(foreshadow_context.strip()),
+            },
+            "prompt_packs": {
+                "stage": "chat",
+                "count": len(prompt_packs),
+                "names": [pack.name for pack in prompt_packs],
+            },
+            "tools": {
+                "mode": "runtime_override" if override_enabled_tools else ("preset_limited" if self.enabled_tools is not None else "all"),
+                "count": len(tool_schemas),
+                "names": [str(schema.get("name")) for schema in tool_schemas if schema.get("name")],
+            },
+        }
 
     async def _foreshadow_context(self, user_input: str, task_plan: list[str]) -> str:
         if task_plan != TASK_PLAN_WRITING and not any(keyword in user_input for keyword in ["伏笔", "回收", "埋设"]):

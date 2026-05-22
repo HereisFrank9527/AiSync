@@ -5,6 +5,14 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.prompt_packs import PromptPackStage
+from app.core.prompt_pack_rendering import (
+    enabled_prompt_packs_for_project_stages,
+    prompt_pack_metadata,
+    prompt_pack_metadata_for_packs,
+    render_prompt_pack_block,
+    render_prompt_pack_block_from_packs,
+)
 from app.llm.types import LLMClient
 from app.projects.context import ProjectContext
 
@@ -82,6 +90,29 @@ class BaseTool(ABC):
             f"文件影响：\n{file_notice}\n"
             f"参数：{params}"
         )
+
+    def prompt_pack_stages(self) -> list[PromptPackStage]:
+        return []
+
+    def prompt_pack_block(self) -> str:
+        return render_prompt_pack_block(self.prompt_pack_stages())
+
+    def prompt_pack_metadata(self) -> dict[str, Any] | None:
+        stages = self.prompt_pack_stages()
+        if not stages:
+            return None
+        return prompt_pack_metadata(stages)
+
+    async def project_prompt_pack_block(self, context: ProjectContext) -> str:
+        packs = await enabled_prompt_packs_for_project_stages(context, self.prompt_pack_stages())
+        return render_prompt_pack_block_from_packs(packs)
+
+    async def project_prompt_pack_metadata(self, context: ProjectContext) -> dict[str, Any] | None:
+        stages = self.prompt_pack_stages()
+        if not stages:
+            return None
+        packs = await enabled_prompt_packs_for_project_stages(context, stages)
+        return prompt_pack_metadata_for_packs(stages, packs)
 
     def frontend_descriptor(self) -> dict[str, Any]:
         presentation = self.presentation()

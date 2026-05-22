@@ -10,6 +10,7 @@ import SettingsPanel from "./components/SettingsPanel";
 import ToolDrawer from "./components/ToolDrawer";
 import ToolsPanel from "./components/ToolsPanel";
 import VectorPanel from "./components/VectorPanel";
+import WorkflowPanel from "./components/WorkflowPanel";
 import { useAgentSocket } from "./hooks/useAgentSocket";
 import { useCharacters } from "./hooks/useCharacters";
 import { useChapters } from "./hooks/useChapters";
@@ -20,8 +21,10 @@ import { useOutline } from "./hooks/useOutline";
 import { usePresets } from "./hooks/usePresets";
 import { useProject } from "./hooks/useProject";
 import { useProjectOverview, withProjectName } from "./hooks/useProjectOverview";
+import { usePromptPacks } from "./hooks/usePromptPacks";
 import { useTools } from "./hooks/useTools";
 import { useVectorIndex } from "./hooks/useVectorIndex";
+import { useWorkflows } from "./hooks/useWorkflows";
 import { useWorldview } from "./hooks/useWorldview";
 import type { AgentEvent, ConversationMessage, ToolDescriptor, ToolRunRecord, ToolWorkspaceView, ViewId } from "./types";
 import { renderRegisteredWorkspaceView, supportedWorkspaceViewIds } from "./workspaceViews";
@@ -69,8 +72,10 @@ function App() {
   const characters = useCharacters(project?.path ?? null);
   const worldview = useWorldview(project?.path ?? null);
   const presets = usePresets();
+  const promptPacks = usePromptPacks(project?.path ?? null);
   const tools = useTools(project?.path ?? null, presets.activeId);
   const vectorIndex = useVectorIndex(project?.path ?? null);
+  const workflows = useWorkflows(project?.path ?? null);
   const implementedToolViewIds = useMemo(() => supportedWorkspaceViewIds(), []);
   const toolViews = useMemo<ToolWorkspaceView[]>(() => {
     const views = tools.tools
@@ -274,6 +279,50 @@ function App() {
     }
   }, [fileTree.refresh, project?.path, selectedFilePath, vectorIndex.refresh]);
 
+  const handleCreateChapterDraftWorkflow = useCallback(async () => {
+    await workflows.create({
+      workflow_type: "chapter_draft",
+      title: "章节草稿工作流",
+      input_summary: "章节草稿最小流程：先规划，再确认，再写作，再润色检查，最后输出到 temp/drafts。",
+      steps: [
+        {
+          name: "检索章节上下文",
+          kind: "context",
+          status: "pending",
+          context_pack_ids: ["outline_node", "related_characters", "related_foreshadows", "world_rules"],
+        },
+        {
+          name: "生成章节计划",
+          kind: "plan",
+          status: "pending",
+          prompt_pack_ids: promptPacks.projectSettings.enabled_pack_ids,
+        },
+        {
+          name: "用户确认计划",
+          kind: "user_confirm",
+          status: "pending",
+        },
+        {
+          name: "分段写作草稿",
+          kind: "draft",
+          status: "pending",
+          prompt_pack_ids: promptPacks.projectSettings.enabled_pack_ids,
+          output_path: "temp/drafts/",
+        },
+        {
+          name: "整合润色与检查",
+          kind: "revise",
+          status: "pending",
+          output_path: "temp/drafts/",
+        },
+      ],
+      metadata: {
+        version: 1,
+        source: "manual_template",
+      },
+    });
+  }, [promptPacks.projectSettings.enabled_pack_ids, workflows]);
+
   return (
     <div className="app-shell">
       <Sidebar
@@ -386,6 +435,21 @@ function App() {
           />
         )}
 
+        {activeView === "workflows" && (
+          <WorkflowPanel
+            runs={workflows.runs}
+            activeRun={workflows.activeRun}
+            loading={workflows.loading}
+            error={workflows.error}
+            onRefresh={() => void workflows.refresh()}
+            onCreateChapterDraft={handleCreateChapterDraftWorkflow}
+            onSelectRun={workflows.selectRun}
+            onUpdateStatus={workflows.updateStatus}
+            onRunNext={workflows.runNext}
+            onConfirm={workflows.confirm}
+          />
+        )}
+
         {activeToolView && renderRegisteredWorkspaceView(activeToolView.view_id as ViewId, {
           outline: {
             ...outline,
@@ -492,6 +556,7 @@ function App() {
             onDelete={presets.remove}
             isBuiltin={presets.isBuiltin}
             tools={tools.tools}
+            promptPacks={promptPacks}
           />
         )}
 

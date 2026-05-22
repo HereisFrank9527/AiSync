@@ -184,6 +184,7 @@ async def run_agent(project_id: str, request: AgentRunRequest) -> dict[str, str]
             enabled_tools=request.enabled_tools,
             override_enabled_tools="enabled_tools" in request.model_fields_set,
         )
+        run_record = runs.update_prompt_audit(run_record.run_id, agent.last_prompt_audit)
         conversation = store.append(conversation.id, "agent", result, "agent_final")
         status = "interrupted" if result == INTERRUPTED_REPLY else "completed"
         store.set_status(conversation.id, status)
@@ -295,6 +296,12 @@ async def agent_websocket(project_id: str, websocket: WebSocket, project_path: s
                                     int(tool["duration_ms"]) if isinstance(tool.get("duration_ms"), int) else None,
                                     str(tool.get("error")) if tool.get("error") else None,
                                 )
+                        elif event_type == "prompt_audit":
+                            metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+                            prompt_audit = metadata.get("prompt_audit")
+                            if isinstance(prompt_audit, dict):
+                                run = runs.update_prompt_audit(run_record.run_id, prompt_audit)
+                                await websocket.send_json(run_event(run))
                         await websocket.send_json(message)
 
                     agent = await create_agent_for_run(project_id, preset_id, project_path, publish_with_run)
