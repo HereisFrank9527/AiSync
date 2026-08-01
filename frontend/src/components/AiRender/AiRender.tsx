@@ -29,20 +29,27 @@ function MetadataView({ metadata }: { metadata?: Record<string, unknown> }) {
   );
 }
 
-export function AiRender({ content, uiHint, metadata, compact }: AiRenderProps) {
+export function AiRender({ content, uiHint, metadata, compact, onWorkspaceChanged }: AiRenderProps) {
   const type = hintType(uiHint);
   const Renderer = rendererFor(type);
+  const rendererOwnsMetadata = type === "list:issues";
 
   return (
     <div className={`ai-render${compact ? " ai-render--compact" : ""}`}>
-      {type && (
+      {type && !rendererOwnsMetadata && (
         <header className="ai-render-header">
           <span>{type}</span>
         </header>
       )}
-      <MetadataView metadata={metadata} />
+      {!rendererOwnsMetadata && <MetadataView metadata={metadata} />}
       {Renderer ? (
-        <Renderer content={content} uiHint={uiHint} metadata={metadata} compact={compact} />
+        <Renderer
+          content={content}
+          uiHint={uiHint}
+          metadata={metadata}
+          compact={compact}
+          onWorkspaceChanged={onWorkspaceChanged}
+        />
       ) : uiHint ? (
         <pre className="ai-render-json">{JSON.stringify(uiHint, null, 2)}</pre>
       ) : content ? (
@@ -61,8 +68,10 @@ export function toolResultToRender(result: ToolResult): AiRenderProps {
 }
 
 export function eventToRender(event: AgentEvent): AiRenderProps {
+  const uiType = hintType(event.ui_hint);
   return {
     content: event.content,
     uiHint: event.ui_hint,
+    metadata: uiType === "list:issues" ? event.metadata : undefined,
   };
 }

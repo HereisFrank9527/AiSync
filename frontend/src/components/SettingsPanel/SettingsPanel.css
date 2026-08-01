@@ -107,7 +107,7 @@
 
 .settings-card-header p {
   margin: 4px 0 0;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
 }
 
@@ -169,8 +169,8 @@
 
 .settings-hint {
   margin: var(--space-sm) 0 0;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
 }
 
 /* ── Form fields ── */
@@ -205,7 +205,8 @@
 .settings-field input:disabled,
 .settings-field select:disabled,
 .settings-textarea:disabled {
-  opacity: 0.5;
+  opacity: 0.72;
+  background: var(--color-bg-secondary);
   cursor: not-allowed;
 }
 
@@ -213,6 +214,53 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(180px, 260px);
   gap: var(--space-sm);
+}
+
+.settings-context-window-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-sm);
+}
+
+.settings-context-window-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  min-height: 72px;
+  padding: var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  cursor: pointer;
+}
+
+.settings-context-window-option:hover,
+.settings-context-window-option.active {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-bg));
+}
+
+.settings-context-window-option input {
+  width: auto;
+  margin-top: 3px;
+  accent-color: var(--color-accent);
+}
+
+.settings-context-window-option span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.settings-context-window-option strong {
+  font-size: var(--font-size-sm);
+}
+
+.settings-context-window-option em {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-style: normal;
+  line-height: 1.4;
 }
 
 /* ── Textarea ── */
@@ -328,6 +376,17 @@
 
 .settings-msg.error {
   color: var(--color-danger);
+}
+
+.settings-model-error {
+  margin: var(--space-xs) 0 0;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 24%, var(--color-border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-danger) 5%, var(--color-bg));
+  font-size: var(--font-size-xs);
+  line-height: 1.45;
+  word-break: break-word;
 }
 
 .settings-update-panel {
@@ -463,6 +522,107 @@
   gap: var(--space-xs);
 }
 
+.settings-prompt-examples {
+  display: grid;
+  gap: var(--space-xs);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  padding: var(--space-sm);
+}
+
+.settings-prompt-examples-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.settings-prompt-examples-header strong {
+  font-size: var(--font-size-sm);
+}
+
+.settings-prompt-examples-header span {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.settings-prompt-example-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-xs);
+}
+
+.settings-prompt-examples button {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  text-align: left;
+}
+
+.settings-prompt-examples button:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-bg));
+}
+
+.settings-prompt-examples button.active {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-bg));
+}
+
+.settings-prompt-examples button span {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.35;
+}
+
+.settings-prompt-example-preview {
+  display: grid;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, var(--color-border));
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+}
+
+.settings-prompt-example-preview > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.settings-prompt-example-preview strong {
+  font-size: var(--font-size-sm);
+}
+
+.settings-prompt-example-preview span,
+.settings-prompt-example-preview p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+}
+
+.settings-prompt-example-preview pre {
+  max-height: 180px;
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-xs);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
 .settings-prompt-list button {
   display: grid;
   gap: 2px;
@@ -516,6 +676,58 @@
 
 .settings-prompt-textarea {
   min-height: 260px;
+}
+
+.settings-system-rules {
+  display: grid;
+  gap: var(--space-md);
+}
+
+.settings-system-rule-textarea {
+  min-height: 320px;
+}
+
+.settings-system-rule-default {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+.settings-system-rule-default summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  cursor: pointer;
+}
+
+.settings-system-rule-default summary strong {
+  font-size: var(--font-size-sm);
+}
+
+.settings-system-rule-default summary span {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.settings-system-rule-default pre {
+  max-height: 240px;
+  overflow: auto;
+  margin: 0 var(--space-md) var(--space-sm);
+  padding: var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.settings-system-rule-default button {
+  margin: 0 var(--space-md) var(--space-md);
 }
 
 .settings-empty-state {
@@ -576,6 +788,10 @@
   }
 
   .settings-model-picker {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-context-window-grid {
     grid-template-columns: 1fr;
   }
 

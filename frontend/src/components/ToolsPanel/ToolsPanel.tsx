@@ -14,12 +14,21 @@ interface ToolsPanelProps {
 }
 
 const categoryLabels: Record<string, string> = {
-  chapter: "章节写作",
-  character: "角色档案",
-  world: "世界设定",
-  search: "资料分析",
-  analysis: "分析校验",
+  generate: "生成工具",
+  edit: "编辑工具",
+  patch: "文件改动包",
+  manage: "管理工具",
+  workspace: "工作区入口",
+  search: "检索工具",
+  review: "审查工具",
   other: "通用能力",
+};
+
+const writePolicyLabels: Record<string, string> = {
+  none: "只读",
+  direct: "直接写入",
+  proposal: "改动包",
+  workspace_only: "工作区",
 };
 
 const statusLabels: Record<ToolRunRecord["status"], string> = {
@@ -28,14 +37,7 @@ const statusLabels: Record<ToolRunRecord["status"], string> = {
 };
 
 function toolCategory(tool: ToolDescriptor) {
-  const name = tool.name.toLowerCase();
-  const presentation = tool.presentation?.type ?? "";
-  if (name.includes("chapter")) return "chapter";
-  if (name.includes("character") || presentation.includes("character")) return "character";
-  if (name.includes("world") || presentation.includes("worldview")) return "world";
-  if (name.includes("search") || presentation.includes("search")) return "search";
-  if (name.includes("consistency") || presentation.includes("issues")) return "analysis";
-  return "other";
+  return tool.governance?.category ?? "other";
 }
 
 function accessCounts(tool: ToolDescriptor) {
@@ -155,9 +157,11 @@ export default function ToolsPanel({ tools, runs, loading, error, onRefresh, onS
                     </div>
                     <p>{tool.description}</p>
                     <div className="tool-card-meta">
+                      <em>{writePolicyLabels[tool.governance?.write_policy ?? ""] ?? "未声明策略"}</em>
                       {tool.default_preset_id && <em>默认方案: {tool.default_preset_id}</em>}
                       <em>{shortPresentation(tool)}</em>
                     </div>
+                    {tool.governance?.agent_boundary && <small>{tool.governance.agent_boundary}</small>}
                     <small>{accessSummary(tool)}</small>
                   </button>
                 ))}

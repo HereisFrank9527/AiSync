@@ -26,7 +26,7 @@ export function useTools(projectPath: string | null, presetId: string | null) {
   const refresh = useCallback(async () => {
     try {
       const list = await api.get<ToolDescriptor[]>(`/tools${projectQuery()}`);
-      setTools(list);
+      setTools(list.filter((tool) => !tool.agent_internal));
       setError("");
       await refreshRuns();
     } catch {

@@ -65,7 +65,7 @@
 
 .foreshadow-stats {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-sm);
 }
 
@@ -118,6 +118,52 @@
   white-space: nowrap;
 }
 
+.foreshadow-list-item .foreshadow-verification {
+  font-weight: 600;
+}
+
+.foreshadow-verification-review,
+.foreshadow-verification-box-review strong {
+  color: #b36b00;
+}
+
+.foreshadow-verification-verified,
+.foreshadow-verification-confirmed,
+.foreshadow-verification-box-verified strong,
+.foreshadow-verification-box-confirmed strong {
+  color: #2f8f5b;
+}
+
+.foreshadow-verification-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-lg);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+}
+
+.foreshadow-verification-box > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.foreshadow-verification-box span,
+.foreshadow-verification-box p {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.foreshadow-verification-box p {
+  flex: 1 1 240px;
+  margin: 0;
+}
+
 .foreshadow-detail {
   min-height: 520px;
   padding: var(--space-lg);
@@ -162,6 +208,10 @@
 
 .foreshadow-form-wide {
   grid-column: 1 / -1;
+}
+
+.foreshadow-form-wide > .character-references {
+  padding: var(--space-sm) 0;
 }
 
 .foreshadow-outline-options {

@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -12,10 +12,12 @@ class ConversationMessage(BaseModel):
     role: Literal["user", "agent"]
     content: str
     type: str = "message"
+    ui_hint: dict[str, Any] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
-ConversationStatus = Literal["idle", "running", "interrupted", "failed", "completed"]
+ConversationStatus = Literal["idle", "running", "interrupted", "failed", "completed", "waiting_user"]
 
 
 class Conversation(BaseModel):
@@ -100,11 +102,28 @@ class ConversationStore:
         if path.exists():
             path.unlink()
 
-    def append(self, conversation_id: str, role: Literal["user", "agent"], content: str, type: str = "message") -> Conversation:
+    def append(
+        self,
+        conversation_id: str,
+        role: Literal["user", "agent"],
+        content: str,
+        type: str = "message",
+        *,
+        ui_hint: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> Conversation:
         conversation = self.get_or_create(conversation_id)
         if len(conversation.messages) == 0 and role == "user":
             conversation.title = content.strip().splitlines()[0][:40] or "新对话"
-        conversation.messages.append(ConversationMessage(role=role, content=content, type=type))
+        conversation.messages.append(
+            ConversationMessage(
+                role=role,
+                content=content,
+                type=type,
+                ui_hint=ui_hint,
+                metadata=metadata or {},
+            )
+        )
         self.save(conversation)
         return conversation
 
@@ -119,6 +138,27 @@ class ConversationStore:
         conversation.last_error = last_error
         conversation.running_since = datetime.now(timezone.utc).isoformat() if status == "running" else None
         self.save(conversation)
+        return conversation
+
+    def update_change_set_message(
+        self,
+        conversation_id: str,
+        change_set_id: str,
+        *,
+        content: str,
+        ui_hint: dict[str, Any],
+        metadata: dict[str, Any] | None = None,
+    ) -> Conversation:
+        conversation = self.load(conversation_id)
+        for message in reversed(conversation.messages):
+            data = message.ui_hint.get("data") if isinstance(message.ui_hint, dict) else None
+            if message.type != "tool_result" or not isinstance(data, dict) or data.get("id") != change_set_id:
+                continue
+            message.content = content
+            message.ui_hint = ui_hint
+            message.metadata.update(metadata or {})
+            self.save(conversation)
+            return conversation
         return conversation
 
     def _path(self, conversation_id: str) -> Path:

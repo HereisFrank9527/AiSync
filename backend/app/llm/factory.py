@@ -27,9 +27,18 @@ def settings_from_preset(llm: LLMParams, base: Settings | None = None) -> Settin
         "llm_api_base": llm.api_base,
         "llm_model_name": llm.model_name,
         "llm_max_tokens": llm.max_tokens,
+        "llm_request_timeout": llm.request_timeout,
+        "llm_context_window": llm.context_window,
         "llm_effort": llm.effort,
         "llm_enable_thinking": llm.enable_thinking,
         "llm_prompt_cache": llm.prompt_cache,
+        "llm_native_web_search": llm.native_web_search,
+        "web_search_provider": llm.web_search_provider,
+        "tavily_api_key": llm.tavily_api_key,
+        "tavily_api_key_env": llm.tavily_api_key_env,
+        "tavily_search_depth": llm.tavily_search_depth,
+        "web_search_max_results": llm.web_search_max_results,
+        "tavily_include_raw_content": llm.tavily_include_raw_content,
     }
     return src.model_copy(update=overrides)
 

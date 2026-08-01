@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
+from app.projects.characters import normalize_character_ids
 from app.projects.context import ProjectContext
 
 FORESHADOW_PATH = "plot/foreshadows.json"
@@ -30,8 +33,25 @@ def _string_list(value: Any) -> list[str]:
     return [str(item).strip() for item in value if str(item or "").strip()]
 
 
+def _normalize_verification(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    status = str(value.get("status") or "unknown").strip()
+    if status not in {"unknown", "verified", "review", "confirmed"}:
+        status = "review"
+    result: dict[str, Any] = {"status": status}
+    for key in ("checked_at", "confirmed_at", "action", "chapter_path", "note"):
+        text = str(value.get(key) or "").strip()
+        if text:
+            result[key] = text
+    if "evidence_match" in value:
+        result["evidence_match"] = bool(value.get("evidence_match"))
+    result["issues"] = _string_list(value.get("issues"))
+    return result
+
+
 def normalize_foreshadow_item(value: dict[str, Any], position: int) -> dict[str, Any]:
-    return {
+    item = {
         "id": str(value.get("id") or f"foreshadow-{position}"),
         "title": str(value.get("title") or f"伏笔 {position}"),
         "summary": str(value.get("summary") or ""),
@@ -39,11 +59,16 @@ def normalize_foreshadow_item(value: dict[str, Any], position: int) -> dict[str,
         "importance": str(value.get("importance") or "medium"),
         "plant_chapter": str(value.get("plant_chapter") or ""),
         "payoff_chapter": str(value.get("payoff_chapter") or ""),
+        "character_ids": normalize_character_ids(value.get("character_ids")),
         "outline_ids": _string_list(value.get("outline_ids")),
         "related_files": _string_list(value.get("related_files")),
         "tags": _string_list(value.get("tags")),
         "notes": str(value.get("notes") or ""),
     }
+    verification = _normalize_verification(value.get("verification"))
+    if verification is not None:
+        item["verification"] = verification
+    return item
 
 
 async def load_foreshadows(context: ProjectContext) -> list[dict[str, Any]]:
@@ -61,6 +86,215 @@ async def load_foreshadows(context: ProjectContext) -> list[dict[str, Any]]:
         for index, item in enumerate(raw_items, start=1)
         if isinstance(item, dict)
     ]
+
+
+async def verify_foreshadow_actions(
+    context: ProjectContext,
+    actions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    items = await load_foreshadows(context)
+    by_id = {item["id"]: item for item in items}
+    verification: list[dict[str, Any]] = []
+
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        foreshadow_id = str(action.get("foreshadow_id") or "")
+        chapter_path = str(action.get("chapter_path") or "")
+        action_name = str(action.get("action") or "")
+        evidence = str(action.get("evidence") or "").strip()
+        issues: list[str] = []
+        evidence_match = False
+
+        item = by_id.get(foreshadow_id)
+        if item is None:
+            issues.append("伏笔记录未找到")
+        if not chapter_path or not await context.exists(chapter_path):
+            issues.append("章节文件不存在")
+        else:
+            chapter_content = await context.read_text(chapter_path)
+            if evidence:
+                normalized_content = re.sub(r"\s+", "", chapter_content)
+                normalized_evidence = re.sub(r"\s+", "", evidence)
+                evidence_match = bool(normalized_evidence and normalized_evidence in normalized_content)
+                if not evidence_match:
+                    evidence_tokens = _text_tokens(evidence)
+                    content_tokens = _text_tokens(chapter_content)
+                    matched_tokens = evidence_tokens.intersection(content_tokens)
+                    evidence_match = bool(
+                        evidence_tokens
+                        and len(matched_tokens) / len(evidence_tokens) >= 0.6
+                    )
+                if not evidence_match:
+                    issues.append("正文中未找到足够匹配的证据")
+            else:
+                issues.append("没有提供正文证据")
+
+        if item is not None:
+            if chapter_path not in item["related_files"]:
+                issues.append("伏笔记录未关联当前章节")
+            if action_name == "plant" and item["plant_chapter"] != chapter_path:
+                issues.append("埋设章节记录不一致")
+            if action_name == "payoff" and (
+                item["payoff_chapter"] != chapter_path or item["status"] != "paid_off"
+            ):
+                issues.append("回收章节或状态记录不一致")
+
+        verification.append(
+            {
+                "action": action_name,
+                "foreshadow_id": foreshadow_id,
+                "chapter_path": chapter_path,
+                "status": "verified" if not issues else "review",
+                "evidence_match": evidence_match,
+                "issues": issues,
+            }
+        )
+
+    return verification
+
+
+async def persist_foreshadow_verification(
+    context: ProjectContext,
+    verification: list[dict[str, Any]],
+) -> None:
+    if not verification:
+        return
+    items = await load_foreshadows(context)
+    by_id = {item["id"]: item for item in items}
+    checked_at = datetime.now(timezone.utc).isoformat()
+    changed = False
+    for result in verification:
+        if not isinstance(result, dict):
+            continue
+        item = by_id.get(str(result.get("foreshadow_id") or ""))
+        if item is None:
+            continue
+        item["verification"] = _normalize_verification(
+            {
+                **result,
+                "checked_at": checked_at,
+            }
+        ) or {"status": "review", "checked_at": checked_at, "issues": ["复核结果无效"]}
+        changed = True
+    if changed:
+        await context.write_json(FORESHADOW_PATH, {"items": items})
+
+
+async def confirm_foreshadow_verification(
+    context: ProjectContext,
+    foreshadow_id: str,
+    note: str = "",
+) -> list[dict[str, Any]]:
+    items = await load_foreshadows(context)
+    item = next((candidate for candidate in items if candidate["id"] == foreshadow_id), None)
+    if item is None:
+        raise ValueError(f"伏笔记录未找到：{foreshadow_id}")
+    current = item.get("verification") if isinstance(item.get("verification"), dict) else {}
+    now = datetime.now(timezone.utc).isoformat()
+    item["verification"] = _normalize_verification(
+        {
+            **current,
+            "status": "confirmed",
+            "confirmed_at": now,
+            "note": note,
+        }
+    ) or {"status": "confirmed", "confirmed_at": now, "issues": []}
+    await context.write_json(FORESHADOW_PATH, {"items": items})
+    return items
+
+
+def apply_foreshadow_actions(
+    items: list[dict[str, Any]],
+    actions: list[dict[str, Any]],
+    chapter_path: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Apply model-declared chapter actions to a copy of the foreshadow ledger."""
+    records = [normalize_foreshadow_item(item, index) for index, item in enumerate(items, start=1)]
+    by_id = {item["id"]: item for item in records}
+    applied: list[dict[str, Any]] = []
+
+    def add_unique(values: list[str], value: str) -> list[str]:
+        return [*values, value] if value and value not in values else values
+
+    def append_evidence(item: dict[str, Any], evidence: str) -> None:
+        if not evidence:
+            return
+        note = f"{chapter_path}: {evidence}"
+        notes = item.get("notes") or ""
+        if note not in notes:
+            item["notes"] = f"{notes}\n{note}".strip()
+
+    for raw in actions:
+        if not isinstance(raw, dict):
+            continue
+        action = str(raw.get("action") or "none").strip().lower()
+        if action == "none":
+            continue
+        if action not in {"plant", "advance", "payoff"}:
+            raise ValueError(f"unsupported foreshadow action: {action}")
+
+        foreshadow_id = str(raw.get("foreshadow_id") or "").strip()
+        title = str(raw.get("title") or "").strip()
+        summary = str(raw.get("summary") or "").strip()
+        evidence = str(raw.get("evidence") or "").strip()
+        payoff_chapter = str(raw.get("payoff_chapter") or "").strip()
+        importance = str(raw.get("importance") or "medium").strip()
+        tags = _string_list(raw.get("tags"))
+
+        if action == "plant":
+            if foreshadow_id:
+                raise ValueError("plant action must not provide an existing foreshadow_id")
+            if not title or not summary:
+                raise ValueError("plant action requires title and summary")
+            if importance not in IMPORTANCE_LABELS:
+                importance = "medium"
+            foreshadow_id = f"foreshadow-{uuid4().hex[:12]}"
+            item = normalize_foreshadow_item(
+                {
+                    "id": foreshadow_id,
+                    "title": title,
+                    "summary": summary,
+                    "status": "planted",
+                    "importance": importance,
+                    "plant_chapter": chapter_path,
+                    "payoff_chapter": payoff_chapter,
+                    "related_files": [chapter_path],
+                    "tags": tags,
+                    "notes": evidence,
+                },
+                len(records) + 1,
+            )
+            records.append(item)
+            by_id[foreshadow_id] = item
+        else:
+            if not foreshadow_id or foreshadow_id not in by_id:
+                raise ValueError(f"{action} action requires an existing foreshadow_id")
+            item = by_id[foreshadow_id]
+            if item["status"] == "abandoned":
+                raise ValueError(f"cannot use abandoned foreshadow: {foreshadow_id}")
+            item["related_files"] = add_unique(item["related_files"], chapter_path)
+            if tags:
+                item["tags"] = list(dict.fromkeys([*item["tags"], *tags]))
+            append_evidence(item, evidence)
+            if action == "advance":
+                item["status"] = "developing"
+            else:
+                item["status"] = "paid_off"
+                item["payoff_chapter"] = chapter_path
+
+        applied.append(
+            {
+                "action": action,
+                "foreshadow_id": foreshadow_id,
+                "title": item["title"],
+                "status": item["status"],
+                "chapter_path": chapter_path,
+                "evidence": evidence,
+            }
+        )
+
+    return records, applied
 
 
 def extract_chapter_paths(text: str) -> list[str]:
@@ -136,6 +370,8 @@ def explain_foreshadow_match(
     if token_hits:
         reasons.append("标题/摘要/标签关键词命中")
 
+    matched = bool(reasons)
+
     if item["importance"] == "major":
         score += 10
     if item["status"] in {"planned", "planted", "developing"}:
@@ -146,7 +382,7 @@ def explain_foreshadow_match(
         reasons.append("伏笔已废弃")
     if item["status"] == "paid_off":
         action = "避免重复回收"
-    return {"score": score, "reasons": reasons, "action": action}
+    return {"score": score, "reasons": reasons, "action": action, "matched": matched}
 
 
 def score_foreshadow(
@@ -213,12 +449,7 @@ async def foreshadow_context_for_prompt(context: ProjectContext, user_input: str
     outline_ids.update(await outline_ids_for_chapters(context, sorted(chapter_paths)))
 
     explained = foreshadows_with_explanations(items, user_input, chapter_paths, outline_ids)
-    matched = [item for item in explained if int(item["_match"]["score"]) > 0]
-    if not matched:
-        matched = [
-            item for item in items
-            if item["status"] in {"planned", "planted", "developing"} and item["importance"] == "major"
-        ]
+    matched = [item for item in explained if item["_match"]["matched"]]
     if not matched:
         return ""
 

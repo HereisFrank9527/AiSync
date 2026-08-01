@@ -1,0 +1,104 @@
+.character-references {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.character-references > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.character-references > header span {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.character-references > header small,
+.character-reference-empty {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.character-reference-tags {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.character-reference-tag {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, var(--color-border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 7%, var(--color-bg));
+  overflow: hidden;
+}
+
+.character-reference-tag.is-archived {
+  border-style: dashed;
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-secondary);
+}
+
+.character-reference-open,
+.character-reference-remove {
+  min-width: 0;
+  min-height: 26px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text);
+}
+
+.character-reference-open {
+  max-width: min(240px, 70vw);
+  overflow: hidden;
+  padding: 3px 8px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.character-reference-open:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.character-reference-remove {
+  width: 26px;
+  padding: 0;
+  border-left: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-base);
+}
+
+.character-reference-remove:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-danger);
+}
+
+.character-references > select {
+  width: min(320px, 100%);
+  min-width: 0;
+}
+
+.character-references.is-readonly > header {
+  display: none;
+}
+
+@media (max-width: 520px) {
+  .character-reference-open {
+    max-width: min(190px, 58vw);
+  }
+
+  .character-references > select {
+    width: 100%;
+  }
+}

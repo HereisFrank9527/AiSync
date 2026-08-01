@@ -4,12 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aisync-backend"
-version = "0.1.0"
+version = "0.2.0"
 description = "AiSync Python backend for AI-assisted novel writing"
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.92.0",
     "fastapi>=0.115.0",
+    "httpx>=0.27.0",
     "openai>=1.70.0",
     "pydantic>=2.10.0",
     "pydantic-settings>=2.7.0",
@@ -20,7 +21,6 @@ dependencies = [
 
 [project.optional-dependencies]
 vector = ["chromadb>=0.6.0"]
-package = ["pyinstaller>=6.11.0"]
 dev = ["pytest>=8.3.0", "pytest-asyncio>=0.25.0", "ruff>=0.9.0"]
 
 [project.scripts]

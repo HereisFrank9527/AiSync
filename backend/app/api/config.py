@@ -10,7 +10,7 @@ from app.core.config import settings
 router = APIRouter(prefix="/config", tags=["config"])
 
 # Fields that require LLM client recreation when changed.
-_REBUILD_FIELDS = {"llm_provider", "llm_api_key_env", "llm_api_base"}
+_REBUILD_FIELDS = {"llm_provider", "llm_api_key_env", "llm_api_base", "llm_native_web_search"}
 
 
 class LLMConfigResponse(BaseModel):
@@ -19,9 +19,12 @@ class LLMConfigResponse(BaseModel):
     llm_api_base: str | None
     llm_model_name: str
     llm_max_tokens: int
+    llm_request_timeout: int
+    llm_context_window: str
     llm_effort: str
     llm_enable_thinking: bool
     llm_prompt_cache: bool
+    llm_native_web_search: bool
 
 
 class LLMConfigUpdate(BaseModel):
@@ -30,9 +33,12 @@ class LLMConfigUpdate(BaseModel):
     llm_api_base: str | None = None
     llm_model_name: str | None = None
     llm_max_tokens: int | None = None
+    llm_request_timeout: int | None = None
+    llm_context_window: Literal["economy", "standard", "long", "maximum"] | None = None
     llm_effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None
     llm_enable_thinking: bool | None = None
     llm_prompt_cache: bool | None = None
+    llm_native_web_search: bool | None = None
 
 
 def _current_llm_config() -> LLMConfigResponse:
@@ -42,9 +48,12 @@ def _current_llm_config() -> LLMConfigResponse:
         llm_api_base=settings.llm_api_base,
         llm_model_name=settings.llm_model_name,
         llm_max_tokens=settings.llm_max_tokens,
+        llm_request_timeout=settings.llm_request_timeout,
+        llm_context_window=settings.llm_context_window,
         llm_effort=settings.llm_effort,
         llm_enable_thinking=settings.llm_enable_thinking,
         llm_prompt_cache=settings.llm_prompt_cache,
+        llm_native_web_search=settings.llm_native_web_search,
     )
 
 

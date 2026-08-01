@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+import io
+import re
+import shutil
+import zipfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.core.config import settings
@@ -14,6 +21,7 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 SAFE_PROJECT_FILE_EXTENSIONS = {".md", ".txt", ".json", ".yaml", ".yml", ".csv"}
 BLOCKED_PROJECT_FILE_ROOTS = {".aisync", ".vectordb"}
 RESERVED_PROJECT_FILE_PATHS = {"temp/.aisync-temp.json"}
+EXPORT_EXCLUDED_ROOTS = {".vectordb", "__pycache__"}
 
 
 class FileWriteRequest(BaseModel):
@@ -30,6 +38,11 @@ class ProjectInitRequest(BaseModel):
     project_path: str | None = None
 
 
+class ProjectRenameRequest(BaseModel):
+    project_path: str
+    name: str
+
+
 class ProjectOverviewUpdateRequest(BaseModel):
     project_path: str | None = None
     name: str
@@ -44,6 +57,58 @@ class FileMoveRequest(BaseModel):
     project_path: str | None = None
     old_path: str
     new_path: str
+
+
+def managed_projects_root() -> Path:
+    root = Path(settings.projects_root).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def slugify_project_name(name: str) -> str:
+    value = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff._-]+", "-", name.strip())
+    value = value.strip(".-_")
+    return value or "untitled"
+
+
+def unique_project_dir(name: str) -> tuple[str, Path]:
+    root = managed_projects_root()
+    base = slugify_project_name(name)
+    project_id = base
+    index = 2
+    while (root / project_id).exists():
+        project_id = f"{base}-{index}"
+        index += 1
+    return project_id, root / project_id
+
+
+def managed_project_path(project_path: str) -> Path:
+    root = managed_projects_root()
+    path = Path(project_path).expanduser().resolve()
+    if path == root or root not in path.parents:
+        raise HTTPException(status_code=400, detail="project is not in managed project library")
+    if not path.exists() or not path.is_dir() or not (path / "project.yaml").exists():
+        raise HTTPException(status_code=404, detail="project not found")
+    return path
+
+
+def project_summary_from_path(path: Path) -> dict[str, str]:
+    metadata_path = path / "project.yaml"
+    name = path.name
+    if metadata_path.exists():
+        try:
+            import yaml
+
+            metadata = yaml.safe_load(metadata_path.read_text(encoding="utf-8")) or {}
+            if isinstance(metadata, dict):
+                nested = metadata.get("project")
+                if isinstance(nested, dict) and nested.get("name"):
+                    name = str(nested["name"])
+                elif metadata.get("name"):
+                    name = str(metadata["name"])
+        except Exception:
+            name = path.name
+    return {"id": path.name, "name": name, "path": str(path)}
 
 
 def project_context(project_id: str | None = None, project_path: str | None = None) -> ProjectContext:
@@ -73,6 +138,19 @@ def normalize_temp_path(path: str) -> str:
     return normalized
 
 
+def normalize_project_directory_path(path: str) -> str:
+    normalized = path.replace("\\", "/").strip().strip("/")
+    parts = normalized.split("/")
+    if (
+        not normalized
+        or any(part in {"", ".", ".."} for part in parts)
+        or any(part.startswith(".") for part in parts)
+        or parts[0] in BLOCKED_PROJECT_FILE_ROOTS
+    ):
+        raise HTTPException(status_code=400, detail="invalid project directory")
+    return normalized
+
+
 def is_safe_project_file(path: str) -> bool:
     normalized = path.replace("\\", "/").strip().lstrip("/")
     parts = normalized.split("/")
@@ -81,6 +159,53 @@ def is_safe_project_file(path: str) -> bool:
     if parts[0] in BLOCKED_PROJECT_FILE_ROOTS or any(part.startswith(".") for part in parts):
         return False
     return Path(normalized).suffix.lower() in SAFE_PROJECT_FILE_EXTENSIONS
+
+
+def safe_zip_members(zip_file: zipfile.ZipFile) -> tuple[list[tuple[zipfile.ZipInfo, str]], str | None]:
+    raw_names = []
+    for info in zip_file.infolist():
+        if info.is_dir():
+            continue
+        normalized = info.filename.replace("\\", "/").strip()
+        parts = normalized.split("/")
+        if (
+            not normalized
+            or "\x00" in normalized
+            or normalized.startswith("/")
+            or Path(normalized).is_absolute()
+            or any(part in {"", ".", ".."} for part in parts)
+        ):
+            raise HTTPException(status_code=400, detail=f"unsafe zip member: {info.filename}")
+        if not normalized:
+            continue
+        raw_names.append(normalized)
+    if not raw_names:
+        raise HTTPException(status_code=400, detail="zip archive has no files")
+
+    strip_root: str | None = None
+    if not any(name == "project.yaml" for name in raw_names):
+        first_parts = [name.split("/", 1)[0] for name in raw_names if "/" in name]
+        if first_parts and len(first_parts) == len(raw_names) and len(set(first_parts)) == 1:
+            strip_root = first_parts[0]
+
+    members: list[tuple[zipfile.ZipInfo, str]] = []
+    for info in zip_file.infolist():
+        if info.is_dir():
+            continue
+        normalized = info.filename.replace("\\", "/").strip()
+        if strip_root and normalized.startswith(f"{strip_root}/"):
+            normalized = normalized[len(strip_root) + 1:]
+        parts = normalized.split("/")
+        if (
+            not normalized
+            or "\x00" in normalized
+            or normalized.startswith("/")
+            or Path(normalized).is_absolute()
+            or any(part in {"", ".", ".."} for part in parts)
+        ):
+            raise HTTPException(status_code=400, detail=f"unsafe zip member: {info.filename}")
+        members.append((info, normalized))
+    return members, strip_root
 
 
 def first_heading(content: str, fallback: str) -> str:
@@ -231,12 +356,113 @@ async def build_project_overview(context: ProjectContext) -> dict[str, Any]:
 
 @router.post("")
 async def create_project(request: ProjectCreateRequest) -> dict[str, str]:
-    project_id = request.name.strip().replace(" ", "-")
-    if not project_id:
+    name = request.name.strip()
+    if not name:
         raise HTTPException(status_code=400, detail="Project name is required")
-    context = project_context(project_id=project_id, project_path=request.project_path)
-    await context.write_yaml("project.yaml", {"name": request.name})
-    return {"id": project_id, "name": request.name, "path": str(context.root)}
+    if request.project_path:
+        project_id = slugify_project_name(name)
+        context = project_context(project_id=project_id, project_path=request.project_path)
+    else:
+        project_id, root = unique_project_dir(name)
+        context = ProjectContext(root)
+    await context.init_structure()
+    await context.write_yaml("project.yaml", {"name": name, "project": {"name": name}})
+    return {"id": project_id, "name": name, "path": str(context.root)}
+
+
+@router.get("")
+async def list_projects() -> list[dict[str, str]]:
+    root = managed_projects_root()
+    projects = [
+        project_summary_from_path(path)
+        for path in root.iterdir()
+        if path.is_dir() and (path / "project.yaml").exists()
+    ]
+    return sorted(projects, key=lambda item: item["name"].casefold())
+
+
+@router.put("/name")
+async def rename_project(request: ProjectRenameRequest) -> dict[str, str]:
+    name = request.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Project name is required")
+    context = ProjectContext(Path(request.project_path).expanduser().resolve())
+    metadata = await read_project_metadata(context)
+    metadata["name"] = name
+    project_info = project_info_from_metadata(metadata, context.root.name)
+    project_info["name"] = name
+    metadata["project"] = project_info
+    await context.write_yaml("project.yaml", metadata)
+    return project_summary_from_path(context.root)
+
+
+@router.delete("")
+async def delete_project(project_path: str = Query(...)) -> dict[str, str]:
+    path = managed_project_path(project_path)
+    project_id = path.name
+    shutil.rmtree(path)
+    return {"id": project_id, "path": str(path), "status": "deleted"}
+
+
+@router.post("/import")
+async def import_project(
+    data: bytes = Body(..., media_type="application/zip"),
+    name: str | None = Query(default=None),
+) -> dict[str, str]:
+    if not data:
+        raise HTTPException(status_code=400, detail="zip archive is empty")
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=400, detail="invalid zip archive") from exc
+
+    with archive:
+        members, strip_root = safe_zip_members(archive)
+        fallback_name = name or strip_root or "imported-project"
+        project_id, target = unique_project_dir(fallback_name)
+        target.mkdir(parents=True, exist_ok=False)
+        try:
+            for info, relative_path in members:
+                output_path = (target / relative_path).resolve()
+                if output_path != target and target not in output_path.parents:
+                    raise HTTPException(status_code=400, detail=f"unsafe zip member: {info.filename}")
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(info) as source, output_path.open("wb") as destination:
+                    shutil.copyfileobj(source, destination)
+            context = ProjectContext(target)
+            await context.init_structure()
+            if name:
+                metadata = await read_project_metadata(context)
+                metadata["name"] = name
+                project_info = project_info_from_metadata(metadata, target.name)
+                project_info["name"] = name
+                metadata["project"] = project_info
+                await context.write_yaml("project.yaml", metadata)
+        except Exception:
+            shutil.rmtree(target, ignore_errors=True)
+            raise
+
+    return {**project_summary_from_path(target), "id": project_id}
+
+
+@router.get("/export")
+async def export_project(project_path: str = Query(...)) -> Response:
+    root = settings.project_path(project_path=project_path)
+    if not root.exists() or not root.is_dir():
+        raise HTTPException(status_code=404, detail="project not found")
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(root.rglob("*")):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(root)
+            if any(part in EXPORT_EXCLUDED_ROOTS for part in relative.parts):
+                continue
+            archive.write(path, relative.as_posix())
+    filename = f"{slugify_project_name(root.name)}.aisync.zip"
+    headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"}
+    return Response(buffer.getvalue(), media_type="application/zip", headers=headers)
 
 
 @router.post("/init")
@@ -327,6 +553,36 @@ async def delete_project_file(file_path: str, project_path: str = Query(...)) ->
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="file not found") from exc
     return {"path": normalized_path, "status": "deleted"}
+
+
+@router.delete("/directories/{directory_path:path}")
+async def delete_project_directory(directory_path: str, project_path: str = Query(...)) -> dict[str, Any]:
+    context = project_context(project_path=project_path)
+    normalized_dir = normalize_project_directory_path(directory_path)
+    if normalized_dir == "temp":
+        raise HTTPException(status_code=400, detail="temp root is protected")
+    directory = context.resolve_path(normalized_dir)
+    if not directory.is_dir():
+        raise HTTPException(status_code=404, detail="directory not found")
+
+    candidates: list[str] = []
+    for raw_path in await context.list_files(normalized_dir):
+        path = raw_path.replace("\\", "/")
+        if path == "temp/.aisync-temp.json":
+            continue
+        if not is_safe_project_file(path):
+            raise HTTPException(status_code=400, detail=f"directory contains unsupported file: {path}")
+        candidates.append(normalize_project_relative_path(path))
+
+    deleted: list[str] = []
+    for normalized_path in candidates:
+        try:
+            await context.delete_file(normalized_path)
+        except FileNotFoundError:
+            continue
+        deleted.append(normalized_path)
+    await asyncio.to_thread(shutil.rmtree, directory)
+    return {"path": normalized_dir, "status": "deleted", "files": deleted}
 
 
 @router.get("/{project_id}/files")

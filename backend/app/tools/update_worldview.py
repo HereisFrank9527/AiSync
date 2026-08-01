@@ -10,6 +10,9 @@ class UpdateWorldviewTool(BaseTool):
     name = "update_worldview"
     description = "在 world 目录下创建或更新世界观 Markdown 文件。"
     workspace_view = ToolWorkspaceView(view_id="worldview", label="世界观整理")
+    category = "edit"
+    write_policy = "direct"
+    agent_boundary = "用于创建或更新 world 目录下的世界观文档；删除旧设定段落、跨文件清理或补丁式替换应使用 file_change_proposal。"
 
     def file_access(self) -> ToolFileAccess:
         return ToolFileAccess(read=["world/**/*.md"], write=["world/**/*.md"], generate=["world/**/*.md"])

@@ -83,10 +83,34 @@ function ParamsView({ params }: { params: Record<string, unknown> }) {
 }
 
 function ToolSummary({ tool }: { tool: ToolDescriptor }) {
+  const categoryLabels: Record<string, string> = {
+    generate: "生成",
+    edit: "编辑",
+    patch: "改动包",
+    manage: "管理",
+    workspace: "工作区",
+    search: "检索",
+    review: "审查",
+    other: "通用",
+  };
+  const writePolicyLabels: Record<string, string> = {
+    none: "只读",
+    direct: "直接写入",
+    proposal: "待确认改动包",
+    workspace_only: "仅打开工作区",
+  };
   return (
     <section className="tool-summary">
       <p>{tool.description}</p>
       <div className="tool-summary-grid">
+        <span>
+          工具分类
+          <strong>{categoryLabels[tool.governance?.category ?? "other"] ?? "通用"}</strong>
+        </span>
+        <span>
+          写入策略
+          <strong>{writePolicyLabels[tool.governance?.write_policy ?? "none"] ?? "未声明"}</strong>
+        </span>
         <span>
           默认方案
           <strong>{tool.default_preset_id ?? "当前设置"}</strong>
@@ -100,6 +124,7 @@ function ToolSummary({ tool }: { tool: ToolDescriptor }) {
           <strong>{tool.has_frontend_ui ? "表单 / AI" : "Agent"}</strong>
         </span>
       </div>
+      {tool.governance?.agent_boundary && <p className="tool-muted">{tool.governance.agent_boundary}</p>}
     </section>
   );
 }

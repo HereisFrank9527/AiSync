@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -34,20 +34,35 @@ class ToolWorkspaceView(BaseModel):
     marker: str = "工具"
 
 
+class ToolGovernance(BaseModel):
+    category: Literal["generate", "edit", "search", "review", "manage", "patch", "workspace", "other"] = "other"
+    write_policy: Literal["none", "direct", "proposal", "workspace_only"] = "none"
+    requires_confirmation: bool = False
+    agent_boundary: str = ""
+
+
 class ToolResult(BaseModel):
     content: str
     ui_hint: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["ok", "error", "duplicate"] = "ok"
+    retryable: bool = False
 
 
 class BaseTool(ABC):
     name: str
     description: str
     has_frontend_ui: bool = True
+    agent_internal: bool = False
     required_permissions: list[str] = []
     default_preset_id: str | None = None
     default_agent: str | None = None
     workspace_view: ToolWorkspaceView | None = None
+    category: Literal["generate", "edit", "search", "review", "manage", "patch", "workspace", "other"] = "other"
+    write_policy: Literal["none", "direct", "proposal", "workspace_only"] = "none"
+    requires_confirmation: bool = False
+    agent_boundary: str = ""
+    uses_agent_llm: bool = False
 
     @abstractmethod
     def schema(self) -> dict[str, Any]:
@@ -73,6 +88,14 @@ class BaseTool(ABC):
 
     def presentation(self) -> ToolPresentation | None:
         return None
+
+    def governance(self) -> ToolGovernance:
+        return ToolGovernance(
+            category=self.category,
+            write_policy=self.write_policy,
+            requires_confirmation=self.requires_confirmation,
+            agent_boundary=self.agent_boundary,
+        )
 
     def build_prompt(self, params: dict[str, Any]) -> str:
         access = self.file_access()
@@ -116,25 +139,35 @@ class BaseTool(ABC):
 
     def frontend_descriptor(self) -> dict[str, Any]:
         presentation = self.presentation()
+        governance = self.governance()
         return {
             "name": self.name,
             "description": self.description,
             "has_frontend_ui": self.has_frontend_ui,
+            "agent_internal": self.agent_internal,
             "input_schema": self.schema(),
             "ui_schema": self.ui_schema() if self.has_frontend_ui else None,
             "default_preset_id": self.default_preset_id,
             # Deprecated compatibility field. Older frontend builds displayed this as an Agent name.
             "default_agent": self.default_agent,
             "file_access": self.file_access().model_dump(),
+            "governance": governance.model_dump(),
             "presentation": presentation.model_dump() if presentation else None,
             "workspace_view": self.workspace_view.model_dump() if self.workspace_view else None,
         }
 
     def claude_schema(self) -> dict[str, Any]:
         schema = self.schema()
+        governance = self.governance()
+        boundary = (
+            f"\n\n工具治理：category={governance.category}; write_policy={governance.write_policy}; "
+            f"requires_confirmation={governance.requires_confirmation}."
+        )
+        if governance.agent_boundary:
+            boundary += f"\n边界：{governance.agent_boundary}"
         return {
             "name": self.name,
-            "description": self.description,
+            "description": f"{self.description}{boundary}",
             "input_schema": schema,
         }
 

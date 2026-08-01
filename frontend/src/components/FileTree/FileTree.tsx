@@ -7,6 +7,7 @@ interface FileTreeProps {
   activePath: string | null;
   onOpenFile: (path: string) => void;
   onCreateTempFile?: (dirPath: string) => void;
+  onDeleteDirectory?: (dirPath: string) => void;
   onRenameTempFile?: (path: string) => void;
   onDeleteTempFile?: (path: string) => void;
 }
@@ -23,6 +24,7 @@ function TreeNode({
   activePath,
   onOpenFile,
   onCreateTempFile,
+  onDeleteDirectory,
   onRenameTempFile,
   onDeleteTempFile,
 }: {
@@ -30,6 +32,7 @@ function TreeNode({
   activePath: string | null;
   onOpenFile: (path: string) => void;
   onCreateTempFile?: (dirPath: string) => void;
+  onDeleteDirectory?: (dirPath: string) => void;
   onRenameTempFile?: (path: string) => void;
   onDeleteTempFile?: (path: string) => void;
 }) {
@@ -46,24 +49,37 @@ function TreeNode({
   if (node.isDir) {
     return (
       <div className="file-tree-dir">
-        <button
-          className="file-tree-dir-toggle"
-          onClick={() => setExpanded((v) => !v)}
-          title={node.path}
-        >
-          <span className={`file-tree-arrow${expanded ? " open" : ""}`} />
-          <span className="file-tree-dir-name">{node.name}</span>
-          {node.path === "temp" && <span className="file-tree-zone-badge">自由区</span>}
-        </button>
-        {node.zone === "temp" && (
+        <div className="file-tree-dir-header">
           <button
-            className="file-tree-action"
-            onClick={() => onCreateTempFile?.(node.path)}
-            title={`在 ${node.path} 新建文本文件`}
+            className="file-tree-dir-toggle"
+            onClick={() => setExpanded((v) => !v)}
+            title={node.path}
           >
-            新建
+            <span className={`file-tree-arrow${expanded ? " open" : ""}`} />
+            <span className="file-tree-dir-name">{node.name}</span>
+            {node.path === "temp" && <span className="file-tree-zone-badge">自由区</span>}
           </button>
-        )}
+          <span className="file-tree-dir-actions">
+            {node.zone === "temp" && (
+              <button
+                className="file-tree-action"
+                onClick={() => onCreateTempFile?.(node.path)}
+                title={`在 ${node.path} 新建文本文件`}
+              >
+                新建
+              </button>
+            )}
+            {node.path !== "temp" && (
+              <button
+                className="file-tree-action file-tree-action--danger"
+                onClick={() => onDeleteDirectory?.(node.path)}
+                title={`删除 ${node.path} 下的文本文件`}
+              >
+                删目录
+              </button>
+            )}
+          </span>
+        </div>
         {expanded && node.children.length > 0 && (
           <div className="file-tree-dir-children">
             {node.children.map((child) => (
@@ -73,6 +89,7 @@ function TreeNode({
                 activePath={activePath}
                 onOpenFile={onOpenFile}
                 onCreateTempFile={onCreateTempFile}
+                onDeleteDirectory={onDeleteDirectory}
                 onRenameTempFile={onRenameTempFile}
                 onDeleteTempFile={onDeleteTempFile}
               />
@@ -113,6 +130,7 @@ export default function FileTree({
   activePath,
   onOpenFile,
   onCreateTempFile,
+  onDeleteDirectory,
   onRenameTempFile,
   onDeleteTempFile,
 }: FileTreeProps) {
@@ -129,6 +147,7 @@ export default function FileTree({
           activePath={activePath}
           onOpenFile={onOpenFile}
           onCreateTempFile={onCreateTempFile}
+          onDeleteDirectory={onDeleteDirectory}
           onRenameTempFile={onRenameTempFile}
           onDeleteTempFile={onDeleteTempFile}
         />

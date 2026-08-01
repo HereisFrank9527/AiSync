@@ -21,6 +21,7 @@ const STATUS_LABELS: Record<ConversationStatus, string> = {
   idle: "空闲",
   running: "运行中",
   interrupted: "已中断",
+  waiting_user: "等待选择",
   failed: "失败",
   completed: "完成",
 };

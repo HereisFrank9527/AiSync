@@ -22,11 +22,13 @@ import { usePresets } from "./hooks/usePresets";
 import { useProject } from "./hooks/useProject";
 import { useProjectOverview, withProjectName } from "./hooks/useProjectOverview";
 import { usePromptPacks } from "./hooks/usePromptPacks";
+import { useSystemRules } from "./hooks/useSystemRules";
 import { useTools } from "./hooks/useTools";
 import { useVectorIndex } from "./hooks/useVectorIndex";
 import { useWorkflows } from "./hooks/useWorkflows";
 import { useWorldview } from "./hooks/useWorldview";
 import type { AgentEvent, ConversationMessage, ToolDescriptor, ToolRunRecord, ToolWorkspaceView, ViewId } from "./types";
+import type { WorkspaceChangeNotice } from "./components/AiRender/types";
 import { renderRegisteredWorkspaceView, supportedWorkspaceViewIds } from "./workspaceViews";
 import "./style.css";
 
@@ -35,6 +37,8 @@ function conversationMessagesToEvents(messages: ConversationMessage[]): AgentEve
     type: message.type,
     content: message.content,
     sender: message.role,
+    ui_hint: message.ui_hint ?? undefined,
+    metadata: message.metadata,
   }));
 }
 
@@ -47,8 +51,23 @@ function isTempTextPath(path: string) {
 }
 
 function App() {
-  const { project, setProject, selectFolder } = useProject();
+  const {
+    project,
+    projects,
+    loadingProjects,
+    projectError,
+    setProject,
+    selectFolder,
+    setProjectPath,
+    createProject,
+    importProject,
+    exportProject,
+    renameProject,
+    deleteProject,
+    refreshProjects,
+  } = useProject();
   const [activeView, setActiveView] = useState<ViewId>("overview");
+  const [focusedCharacterId, setFocusedCharacterId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [selectedTool, setSelectedTool] = useState<ToolDescriptor | null>(null);
   const [selectedToolRun, setSelectedToolRun] = useState<ToolRunRecord | null>(null);
@@ -58,6 +77,7 @@ function App() {
   const [fileSaving, setFileSaving] = useState(false);
   const [showConversations, setShowConversations] = useState(false);
   const projectInitRef = useRef<string | null>(null);
+  const onboardingImportInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleProjectNameChange = useCallback((name: string) => {
     setProject((current) => current && current.name !== name ? withProjectName(current, name) : current);
@@ -73,6 +93,7 @@ function App() {
   const worldview = useWorldview(project?.path ?? null);
   const presets = usePresets();
   const promptPacks = usePromptPacks(project?.path ?? null);
+  const systemRules = useSystemRules(project?.path ?? null);
   const tools = useTools(project?.path ?? null, presets.activeId);
   const vectorIndex = useVectorIndex(project?.path ?? null);
   const workflows = useWorkflows(project?.path ?? null);
@@ -100,7 +121,7 @@ function App() {
     void conversations.refresh();
   }, [conversations.refresh, conversations.setActiveConversationId]);
 
-  const { connected, events, historyVersion, activeRun, send, interrupt, setPresetId, setHistory, clearEvents } =
+  const { connected, events, historyVersion, activeRun, send, interrupt, retryRun, setPresetId, setHistory, clearEvents } =
     useAgentSocket(project?.path ?? null, conversations.activeConversationId, handleConversationIdChange);
 
   const lastEvent = events[events.length - 1];
@@ -196,6 +217,55 @@ function App() {
     setActiveView("files");
   }, [project?.path]);
 
+  const handleOpenCharacter = useCallback((characterId: string) => {
+    setFocusedCharacterId(characterId);
+    setActiveView("characters");
+  }, []);
+
+  const handleAgentWorkspaceChanged = useCallback(async (notice: WorkspaceChangeNotice) => {
+    if (!project?.path) return;
+    const selectedChange = selectedFilePath
+      ? notice.changes.find((change) => change.path === selectedFilePath)
+      : undefined;
+
+    await Promise.allSettled([
+      fileTree.refresh(),
+      overview.refresh(),
+      chapters.refresh(),
+      outline.refresh(),
+      foreshadows.refresh(),
+      characters.refresh(),
+      worldview.refresh(),
+      vectorIndex.refresh(),
+    ]);
+
+    if (!selectedChange || !selectedFilePath) return;
+    if (selectedChange.operation === "delete") {
+      setSelectedFilePath(null);
+      setSelectedFileContent("");
+      return;
+    }
+    try {
+      const response = await api.get<{ path: string; content: string }>(
+        `/projects/files/${encodeProjectFilePath(selectedFilePath)}?project_path=${encodeURIComponent(project.path)}`,
+      );
+      setSelectedFileContent(response.content);
+    } catch {
+      // The file tree refresh already reflects the authoritative state.
+    }
+  }, [
+    chapters.refresh,
+    characters.refresh,
+    fileTree.refresh,
+    foreshadows.refresh,
+    outline.refresh,
+    overview.refresh,
+    project?.path,
+    selectedFilePath,
+    vectorIndex.refresh,
+    worldview.refresh,
+  ]);
+
   const handleSaveFile = useCallback(async () => {
     if (!project?.path || !selectedFilePath) return;
     setFileSaving(true);
@@ -279,64 +349,94 @@ function App() {
     }
   }, [fileTree.refresh, project?.path, selectedFilePath, vectorIndex.refresh]);
 
+  const handleDeleteDirectory = useCallback(async (path: string) => {
+    if (!project?.path) return;
+    if (!window.confirm(`确定递归删除目录及其中的项目文件？\n${path}\n\n项目内部运行文件不会被删除。`)) return;
+    try {
+      await api.del(`/projects/directories/${encodeProjectFilePath(path)}?project_path=${encodeURIComponent(project.path)}`);
+      if (selectedFilePath === path || selectedFilePath?.startsWith(`${path}/`)) {
+        setSelectedFilePath(null);
+        setSelectedFileContent("");
+      }
+      await fileTree.refresh();
+      void vectorIndex.refresh();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "删除目录失败");
+    }
+  }, [fileTree.refresh, project?.path, selectedFilePath, vectorIndex.refresh]);
+
   const handleCreateChapterDraftWorkflow = useCallback(async () => {
-    await workflows.create({
-      workflow_type: "chapter_draft",
+    await workflows.createFromTemplate("chapter_draft_safe", {
       title: "章节草稿工作流",
-      input_summary: "章节草稿最小流程：先规划，再确认，再写作，再润色检查，最后输出到 temp/drafts。",
-      steps: [
-        {
-          name: "检索章节上下文",
-          kind: "context",
-          status: "pending",
-          context_pack_ids: ["outline_node", "related_characters", "related_foreshadows", "world_rules"],
-        },
-        {
-          name: "生成章节计划",
-          kind: "plan",
-          status: "pending",
-          prompt_pack_ids: promptPacks.projectSettings.enabled_pack_ids,
-        },
-        {
-          name: "用户确认计划",
-          kind: "user_confirm",
-          status: "pending",
-        },
-        {
-          name: "分段写作草稿",
-          kind: "draft",
-          status: "pending",
-          prompt_pack_ids: promptPacks.projectSettings.enabled_pack_ids,
-          output_path: "temp/drafts/",
-        },
-        {
-          name: "整合润色与检查",
-          kind: "revise",
-          status: "pending",
-          output_path: "temp/drafts/",
-        },
-      ],
-      metadata: {
-        version: 1,
-        source: "manual_template",
-      },
+      input_summary: "章节草稿最小流程：先规划，再确认，再写作，最后输出到 temp/drafts。",
     });
-  }, [promptPacks.projectSettings.enabled_pack_ids, workflows]);
+  }, [workflows]);
 
   return (
     <div className="app-shell">
       <Sidebar
         projectName={project?.name ?? "未选择"}
         projectPath={project?.path ?? ""}
+        projects={projects}
+        projectsLoading={loadingProjects}
+        projectError={projectError}
         connected={connected}
         activeView={activeView}
         toolViews={toolViews}
         onViewChange={setActiveView}
         onSelectFolder={() => void selectFolder()}
+        onSetProjectPath={(path) => void setProjectPath(path)}
+        onSelectProject={(path) => {
+          const next = projects.find((item) => item.path === path);
+          if (next) setProject(next);
+        }}
+        onCreateProject={() => void createProject()}
+        onImportProject={(file) => void importProject(file)}
+        onExportProject={() => void exportProject()}
+        onRenameProject={() => void renameProject()}
+        onDeleteProject={() => void deleteProject()}
+        onRefreshProjects={() => void refreshProjects()}
       />
 
       <main className="main-content">
-        {activeView === "chat" && (
+        {!project?.path && (
+          <div className="project-onboarding">
+            <div className="project-onboarding-panel">
+              <div className="project-onboarding-mark">A</div>
+              <h2>选择一个小说项目</h2>
+              <p>项目会保存在 AiSync 的项目库中，也可以从备份 zip 导入；外部文件夹适合接管旧项目或临时测试。</p>
+              {projectError && <div className="project-onboarding-error">{projectError}</div>}
+              <div className="project-onboarding-actions">
+                <button className="btn-primary" onClick={() => void createProject()} type="button">
+                  新建项目
+                </button>
+                <button className="btn-secondary" onClick={() => onboardingImportInputRef.current?.click()} type="button">
+                  导入项目
+                </button>
+                <button className="btn-secondary" onClick={() => void selectFolder()} type="button">
+                  打开外部文件夹
+                </button>
+                <button className="btn-ghost" onClick={() => void refreshProjects()} type="button">
+                  刷新项目库
+                </button>
+              </div>
+              {loadingProjects && <p className="project-onboarding-muted">正在读取项目库...</p>}
+              <input
+                ref={onboardingImportInputRef}
+                className="project-onboarding-file"
+                type="file"
+                accept=".zip,.aisync.zip,application/zip"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (file) void importProject(file);
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {project?.path && activeView === "chat" && (
           <div className="chat-workspace">
             {showConversations && (
               <ConversationList
@@ -360,13 +460,11 @@ function App() {
                 tools={tools.tools}
                 onSend={send}
                 onInterrupt={interrupt}
-                onRetryLast={() => {
-                  if (!activeRun?.input_preview) return;
-                  send(activeRun.input_preview);
-                }}
+                onRetryRun={retryRun}
                 onContinueWithError={(error) => {
                   setInput(`刚才 Agent 运行失败，错误如下：\n${error}\n\n请基于这个错误继续处理。`);
                 }}
+                onWorkspaceChanged={handleAgentWorkspaceChanged}
                 input={input}
                 onInputChange={setInput}
                 showConversations={showConversations}
@@ -376,7 +474,7 @@ function App() {
           </div>
         )}
 
-        {activeView === "overview" && (
+        {project?.path && activeView === "overview" && (
           <OverviewPanel
             overview={overview.overview}
             loading={overview.loading}
@@ -388,7 +486,7 @@ function App() {
           />
         )}
 
-        {activeView === "files" && (
+        {project?.path && activeView === "files" && (
           <div className="files-workspace">
             <aside className="files-sidebar">
               <header className="files-sidebar-header">
@@ -404,6 +502,7 @@ function App() {
                 activePath={selectedFilePath}
                 onOpenFile={handleOpenFile}
                 onCreateTempFile={handleCreateTempFile}
+                onDeleteDirectory={handleDeleteDirectory}
                 onRenameTempFile={handleRenameTempFile}
                 onDeleteTempFile={handleDeleteTempFile}
               />
@@ -420,7 +519,7 @@ function App() {
           </div>
         )}
 
-        {activeView === "vector" && (
+        {project?.path && activeView === "vector" && (
           <VectorPanel
             status={vectorIndex.status}
             results={vectorIndex.results}
@@ -435,7 +534,7 @@ function App() {
           />
         )}
 
-        {activeView === "workflows" && (
+        {project?.path && activeView === "workflows" && (
           <WorkflowPanel
             runs={workflows.runs}
             activeRun={workflows.activeRun}
@@ -443,14 +542,31 @@ function App() {
             error={workflows.error}
             onRefresh={() => void workflows.refresh()}
             onCreateChapterDraft={handleCreateChapterDraftWorkflow}
+            onCreateChapterBatch={workflows.createChapterBatch}
+            onCreateFromTemplate={workflows.createFromTemplate}
+            onCreateCustom={workflows.create}
             onSelectRun={workflows.selectRun}
             onUpdateStatus={workflows.updateStatus}
+            onUpdateRun={workflows.updateRun}
+            onUpdateStep={workflows.updateStep}
+            onAddStep={workflows.addStep}
+            onDeleteStep={workflows.deleteStep}
+            onResetStep={workflows.resetStep}
+            onSkipStep={workflows.skipStep}
+            onDeleteRun={workflows.remove}
             onRunNext={workflows.runNext}
+            onRunContinuous={workflows.runContinuous}
+            onPause={workflows.pause}
             onConfirm={workflows.confirm}
+            executingRunId={workflows.executingRunId}
+            continuousRunId={workflows.continuousRunId}
+            presets={presets.presets}
+            templates={workflows.templates}
+            promptPacks={promptPacks.packs}
           />
         )}
 
-        {activeToolView && renderRegisteredWorkspaceView(activeToolView.view_id as ViewId, {
+        {project?.path && activeToolView && renderRegisteredWorkspaceView(activeToolView.view_id as ViewId, {
           outline: {
             ...outline,
             save: async (title, items) => {
@@ -461,6 +577,13 @@ function App() {
             },
             importMarkdown: async () => {
               const result = await outline.importMarkdown();
+              void overview.refresh();
+              void fileTree.refresh();
+              void vectorIndex.refresh();
+              return result;
+            },
+            saveSource: async (content) => {
+              const result = await outline.saveSource(content);
               void overview.refresh();
               void fileTree.refresh();
               void vectorIndex.refresh();
@@ -489,8 +612,39 @@ function App() {
               void vectorIndex.refresh();
               return result;
             },
+            confirmVerification: async (foreshadowId) => {
+              const result = await foreshadows.confirmVerification(foreshadowId);
+              void overview.refresh();
+              void fileTree.refresh();
+              void vectorIndex.refresh();
+              return result;
+            },
           },
-          characters,
+          characters: {
+            ...characters,
+            focusedCharacterId,
+            save: async (character) => {
+              const result = await characters.save(character);
+              void overview.refresh();
+              void fileTree.refresh();
+              void vectorIndex.refresh();
+              return result;
+            },
+            archive: async (slug, reason) => {
+              const result = await characters.archive(slug, reason);
+              void overview.refresh();
+              void fileTree.refresh();
+              void vectorIndex.refresh();
+              return result;
+            },
+            restore: async (archiveId) => {
+              const result = await characters.restore(archiveId);
+              void overview.refresh();
+              void fileTree.refresh();
+              void vectorIndex.refresh();
+              return result;
+            },
+          },
           worldview: {
             ...worldview,
             saveDocument: async (path, content) => {
@@ -535,15 +689,16 @@ function App() {
           tools: tools.tools,
           openTool: (tool, initialParams) => { setSelectedTool(tool); setSelectedToolRun(null); setToolInitialParams(initialParams ?? null); },
           openFile: handleOpenFile,
+          openCharacter: handleOpenCharacter,
         })}
 
-        {activeView === "settings" && presets.loading && (
+        {project?.path && activeView === "settings" && presets.loading && (
           <div className="view-status view-status--loading">加载预设中…</div>
         )}
-        {activeView === "settings" && presets.error && (
+        {project?.path && activeView === "settings" && presets.error && (
           <div className="view-status view-status--error">{presets.error}</div>
         )}
-        {activeView === "settings" && !presets.loading && !presets.error && (
+        {project?.path && activeView === "settings" && !presets.loading && !presets.error && (
           <SettingsPanel
             presets={presets.presets}
             activeId={presets.activeId}
@@ -557,10 +712,11 @@ function App() {
             isBuiltin={presets.isBuiltin}
             tools={tools.tools}
             promptPacks={promptPacks}
+            systemRules={systemRules}
           />
         )}
 
-        {activeView === "tools" && (
+        {project?.path && activeView === "tools" && (
           <ToolsPanel
             tools={tools.tools}
             runs={tools.runs}

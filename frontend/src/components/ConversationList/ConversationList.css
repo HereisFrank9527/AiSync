@@ -87,6 +87,11 @@
   color: var(--color-text-secondary);
 }
 
+.conversation-status.is-waiting_user {
+  color: var(--color-warning, #9a6700);
+  border-color: #e8d49a;
+}
+
 .conversation-status.is-completed {
   color: var(--color-success);
   border-color: #c9e3ce;
@@ -113,4 +118,24 @@
 
 .conversation-error {
   color: var(--color-danger);
+}
+
+@media (max-width: 700px) {
+  .conversation-list {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    max-height: 34dvh;
+    padding: var(--space-sm) var(--space-md);
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .conversation-items {
+    max-height: 24dvh;
+  }
+
+  .conversation-main {
+    min-height: 34px;
+  }
 }

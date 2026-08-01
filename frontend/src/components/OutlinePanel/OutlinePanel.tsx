@@ -1,18 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
-import type { OutlineItem, StoryChapters, StoryOutline, ToolDescriptor } from "../../types";
+import type { OutlineItem, OutlineNode, StoryChapters, StoryCharacters, StoryOutline, ToolDescriptor } from "../../types";
+import CharacterReferences from "../CharacterReferences";
 import MarkdownView from "../MarkdownView";
 import "./OutlinePanel.css";
 
 interface OutlinePanelProps {
   outline: StoryOutline | null;
   chapters: StoryChapters | null;
+  characters: StoryCharacters | null;
   loading: boolean;
   error: string;
   tools: ToolDescriptor[];
   onRefresh: () => void;
   onSave: (title: string, items: OutlineItem[]) => void | Promise<unknown>;
   onImportMarkdown: () => void | Promise<unknown>;
+  onSaveSource: (content: string) => void | Promise<unknown>;
+  onSaveCharacters: (nodeId: string, characterIds: string[]) => void | Promise<unknown>;
   onOpenTool: (tool: ToolDescriptor) => void;
+  onOpenCharacter: (characterId: string) => void;
 }
 
 const STATUS_OPTIONS = [
@@ -30,16 +35,27 @@ function statusLabel(status: unknown) {
   return STATUS_OPTIONS.find((option) => option.value === status)?.label ?? "未开始";
 }
 
+function nodeKindLabel(kind: string) {
+  if (kind === "volume") return "卷";
+  if (kind === "chapter") return "章节";
+  if (kind === "markdown") return "Markdown";
+  return "区块";
+}
+
 export default function OutlinePanel({
   outline,
   chapters,
+  characters,
   loading,
   error,
   tools,
   onRefresh,
   onSave,
   onImportMarkdown,
+  onSaveSource,
+  onSaveCharacters,
   onOpenTool,
+  onOpenCharacter,
 }: OutlinePanelProps) {
   const outlineTool = tools.find((tool) => tool.name === "outline_generate");
   const sourceItems = useMemo(() => outline?.items ?? [], [outline?.items]);
@@ -49,6 +65,10 @@ export default function OutlinePanel({
   const [activeTab, setActiveTab] = useState<"structure" | "raw">("structure");
   const [query, setQuery] = useState("");
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [sourceEditing, setSourceEditing] = useState(false);
+  const [sourceDraft, setSourceDraft] = useState("");
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [savingCharacterNodeId, setSavingCharacterNodeId] = useState<string | null>(null);
 
   useEffect(() => {
     setTitle(outline?.title || "大纲");
@@ -58,12 +78,17 @@ export default function OutlinePanel({
       title: String(item.title || item.raw || `节点 ${index + 1}`),
       summary: String(item.summary || ""),
       status: String(item.status || "planned"),
+      character_ids: Array.isArray(item.character_ids) ? item.character_ids.map(String) : [],
     })));
     setEditing(false);
-  }, [outline?.title, sourceItems]);
+    setSourceDraft(outline?.content || "");
+    setSourceEditing(false);
+  }, [outline?.content, outline?.title, sourceItems]);
 
   const items = editing ? draftItems : sourceItems;
   const markdownOnly = outline?.format === "markdown_only";
+  const hybridNodes = useMemo(() => outline?.nodes ?? [], [outline?.nodes]);
+  const hybridMode = outline?.format === "hybrid" && hybridNodes.length > 0;
   const importableItems = outline?.importable_items ?? [];
   const linkedChapters = useMemo(() => {
     const groups = new Map<string, NonNullable<StoryChapters["items"]>>();
@@ -82,6 +107,25 @@ export default function OutlinePanel({
       return text.includes(normalizedQuery);
     })
     : items;
+  const visibleNodes = useMemo(() => normalizedQuery
+    ? hybridNodes.filter((node) => `${node.title}\n${node.heading || ""}\n${node.body || ""}`.toLowerCase().includes(normalizedQuery))
+    : hybridNodes, [hybridNodes, normalizedQuery]);
+  const chapterNodeCount = hybridNodes.filter((node) => node.kind === "chapter").length;
+  const selectedNode = visibleNodes.find((node) => node.id === selectedNodeId) ?? visibleNodes[0] ?? null;
+  const selectedNodeIndex = selectedNode ? visibleNodes.findIndex((node) => node.id === selectedNode.id) : -1;
+  const selectedParent = selectedNode?.parent_id
+    ? hybridNodes.find((node) => node.id === selectedNode.parent_id) ?? null
+    : null;
+  const selectedChildCount = selectedNode
+    ? hybridNodes.filter((node) => node.parent_id === selectedNode.id).length
+    : 0;
+
+  useEffect(() => {
+    setSelectedNodeId((current) => {
+      if (current && hybridNodes.some((node) => node.id === current)) return current;
+      return hybridNodes[0]?.id ?? null;
+    });
+  }, [hybridNodes]);
 
   const updateItem = (index: number, patch: Partial<OutlineItem>) => {
     setDraftItems((current) => current.map((item, i) => i === index ? { ...item, ...patch } : item));
@@ -97,6 +141,7 @@ export default function OutlinePanel({
         title: `节点 ${current.length + 1}`,
         summary: "",
         status: "planned",
+        character_ids: [],
       },
     ]);
   };
@@ -143,8 +188,29 @@ export default function OutlinePanel({
       title: String(item.title || item.raw || `节点 ${index + 1}`),
       summary: String(item.summary || ""),
       status: String(item.status || "planned"),
+      character_ids: Array.isArray(item.character_ids) ? item.character_ids.map(String) : [],
     })));
     setEditing(false);
+  };
+
+  const startSourceEditing = () => {
+    setSourceDraft(outline?.content || "# 大纲\n\n");
+    setActiveTab("raw");
+    setSourceEditing(true);
+  };
+
+  const handleSourceSave = async () => {
+    await onSaveSource(sourceDraft);
+    setSourceEditing(false);
+  };
+
+  const saveNodeCharacters = async (nodeId: string, characterIds: string[]) => {
+    setSavingCharacterNodeId(nodeId);
+    try {
+      await onSaveCharacters(nodeId, characterIds);
+    } finally {
+      setSavingCharacterNodeId(null);
+    }
   };
 
   return (
@@ -164,7 +230,9 @@ export default function OutlinePanel({
         </div>
         <div className="outline-actions">
           <button className="btn-secondary" onClick={onRefresh}>刷新</button>
-          {editing ? (
+          {hybridMode ? (
+            <button className="btn-secondary" onClick={startSourceEditing}>编辑 Markdown</button>
+          ) : editing ? (
             <>
               <button className="btn-secondary" onClick={resetDraft}>取消</button>
               <button className="btn-primary" onClick={() => void handleSave()}>保存</button>
@@ -172,7 +240,7 @@ export default function OutlinePanel({
           ) : (
             <button className="btn-secondary" onClick={() => setEditing(true)}>编辑</button>
           )}
-          <button className="btn-secondary" onClick={addItem}>新增节点</button>
+          {!hybridMode && <button className="btn-secondary" onClick={addItem}>新增节点</button>}
           <button className="btn-primary" disabled={!outlineTool} onClick={() => outlineTool && onOpenTool(outlineTool)}>
             AI 生成/续写
           </button>
@@ -190,7 +258,13 @@ export default function OutlinePanel({
           <button className={activeTab === "raw" ? "active" : ""} onClick={() => setActiveTab("raw")}>
             原文视图
           </button>
-          <span>{markdownOnly ? "Markdown 原文尚未结构化" : `${items.length} 个结构节点`}</span>
+          <span>
+            {hybridMode
+              ? `${hybridNodes.length} 个区块 · ${chapterNodeCount} 个章节`
+              : markdownOnly
+                ? "Markdown 原文尚未结构化"
+                : `${items.length} 个结构节点`}
+          </span>
         </div>
       )}
 
@@ -215,11 +289,122 @@ export default function OutlinePanel({
             onChange={(event) => setQuery(event.target.value)}
             placeholder="搜索标题或摘要"
           />
-          <span>{visibleItems.length} / {items.length} 个节点</span>
+          <span>
+            {hybridMode
+              ? `${visibleNodes.length} / ${hybridNodes.length} 个区块`
+              : `${visibleItems.length} / ${items.length} 个节点`}
+          </span>
         </section>
       )}
 
-      {!loading && !error && activeTab === "structure" && items.length > 0 && (
+      {!loading && !error && activeTab === "structure" && hybridMode && visibleNodes.length > 0 && (
+        <div className="outline-workbench">
+          <aside className="outline-navigator" aria-label="大纲目录">
+            <div className="outline-navigator-header">
+              <strong>大纲目录</strong>
+              <span>{visibleNodes.length} 个区块</span>
+            </div>
+            <div className="outline-navigator-list">
+              {visibleNodes.map((node) => {
+                const active = selectedNode?.id === node.id;
+                const depth = Math.min(Math.max(node.level - 2, 0), 4);
+                return (
+                  <button
+                    className={`outline-navigator-item${active ? " active" : ""}`}
+                    key={node.id}
+                    onClick={() => setSelectedNodeId(node.id)}
+                    title={node.heading || node.title}
+                  >
+                    <span className="outline-navigator-indent" style={{ width: `${depth * 12}px` }} />
+                    <span className={`outline-node-kind outline-node-kind-${node.kind}`}>
+                      {nodeKindLabel(node.kind)}
+                    </span>
+                    <span className="outline-navigator-copy">
+                      <strong>{node.heading || node.title}</strong>
+                      {node.source_start_line && (
+                        <small>
+                          {node.source_start_line}{node.source_end_line ? `-${node.source_end_line}` : ""} 行
+                        </small>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </aside>
+
+          {selectedNode && (
+            <article className="outline-reader">
+              <header className="outline-reader-header">
+                <div className="outline-reader-heading">
+                  <div>
+                    <span className={`outline-node-kind outline-node-kind-${selectedNode.kind}`}>
+                      {nodeKindLabel(selectedNode.kind)}
+                    </span>
+                    {selectedParent && <span className="outline-reader-parent">{selectedParent.heading || selectedParent.title}</span>}
+                  </div>
+                  <h3>{selectedNode.heading || selectedNode.title}</h3>
+                </div>
+                <div className="outline-reader-navigation" aria-label="区块切换">
+                  <button
+                    className="btn-secondary"
+                    disabled={selectedNodeIndex <= 0}
+                    onClick={() => setSelectedNodeId(visibleNodes[selectedNodeIndex - 1]?.id ?? selectedNode.id)}
+                  >
+                    上一个
+                  </button>
+                  <span>{selectedNodeIndex + 1} / {visibleNodes.length}</span>
+                  <button
+                    className="btn-secondary"
+                    disabled={selectedNodeIndex < 0 || selectedNodeIndex >= visibleNodes.length - 1}
+                    onClick={() => setSelectedNodeId(visibleNodes[selectedNodeIndex + 1]?.id ?? selectedNode.id)}
+                  >
+                    下一个
+                  </button>
+                </div>
+              </header>
+
+              <div className="outline-reader-meta">
+                <span>原文 {selectedNode.source_start_line || "-"}{selectedNode.source_end_line ? `-${selectedNode.source_end_line}` : ""} 行</span>
+                <span>{selectedChildCount} 个直接子区块</span>
+                {selectedNode.kind === "chapter" && <span>{statusLabel(selectedNode.status)}</span>}
+              </div>
+
+              <div className="outline-reader-characters">
+                <CharacterReferences
+                  characters={characters}
+                  selectedIds={selectedNode.character_ids ?? []}
+                  label="本节点人物"
+                  disabled={savingCharacterNodeId === selectedNode.id}
+                  onChange={(characterIds) => void saveNodeCharacters(selectedNode.id, characterIds)}
+                  onOpenCharacter={onOpenCharacter}
+                />
+              </div>
+
+              {(linkedChapters.get(selectedNode.id) ?? []).length > 0 && (
+                <div className="outline-linked-chapters outline-reader-linked">
+                  {(linkedChapters.get(selectedNode.id) ?? []).map((chapter) => (
+                    <span key={chapter.path}>{chapter.title} · {chapter.status || "draft"}</span>
+                  ))}
+                </div>
+              )}
+
+              <div className="outline-reader-body">
+                {selectedNode.body ? (
+                  <MarkdownView content={selectedNode.body} />
+                ) : (
+                  <div className="outline-reader-empty">
+                    <strong>这是一个结构标题</strong>
+                    <p>它没有独立正文，请从左侧选择下属区块查看详细内容。</p>
+                  </div>
+                )}
+              </div>
+            </article>
+          )}
+        </div>
+      )}
+
+      {!loading && !error && activeTab === "structure" && !hybridMode && items.length > 0 && (
         <div className="outline-list">
           {visibleItems.map((item, visibleIndex) => {
             const itemIndex = items.indexOf(item);
@@ -264,6 +449,13 @@ export default function OutlinePanel({
                       value={String(item.summary || "")}
                       onChange={(event) => updateItem(index, { summary: event.target.value })}
                     />
+                    <CharacterReferences
+                      characters={characters}
+                      selectedIds={Array.isArray(item.character_ids) ? item.character_ids.map(String) : []}
+                      label="节点人物"
+                      onChange={(characterIds) => updateItem(index, { character_ids: characterIds })}
+                      onOpenCharacter={onOpenCharacter}
+                    />
                     <div className="outline-item-edit-actions">
                       <button className="btn-secondary" disabled={index === 0} onClick={() => moveItem(index, -1)}>上移</button>
                       <button className="btn-secondary" disabled={index === draftItems.length - 1} onClick={() => moveItem(index, 1)}>下移</button>
@@ -285,6 +477,12 @@ export default function OutlinePanel({
                         ))}
                       </div>
                     )}
+                    <CharacterReferences
+                      characters={characters}
+                      selectedIds={Array.isArray(item.character_ids) ? item.character_ids.map(String) : []}
+                      readOnly
+                      onOpenCharacter={onOpenCharacter}
+                    />
                     {item.summary && <MarkdownView content={String(item.summary)} />}
                   </>
                 )}
@@ -295,14 +493,21 @@ export default function OutlinePanel({
         </div>
       )}
 
-      {!loading && !error && activeTab === "structure" && items.length > 0 && visibleItems.length === 0 && (
+      {!loading && !error && activeTab === "structure" && hybridMode && hybridNodes.length > 0 && visibleNodes.length === 0 && (
+        <div className="outline-empty">
+          <h3>没有匹配的大纲区块</h3>
+          <p>换一个关键词，或清空搜索条件。</p>
+        </div>
+      )}
+
+      {!loading && !error && activeTab === "structure" && !hybridMode && items.length > 0 && visibleItems.length === 0 && (
         <div className="outline-empty">
           <h3>没有匹配的大纲节点</h3>
           <p>换一个关键词，或清空搜索条件。</p>
         </div>
       )}
 
-      {!loading && !error && activeTab === "structure" && items.length === 0 && !markdownOnly && (
+      {!loading && !error && activeTab === "structure" && !hybridMode && items.length === 0 && !markdownOnly && (
         <div className="outline-empty">
           <h3>还没有结构化大纲</h3>
           <p>可以先在 `plot/outline.md` 手写，也可以用 AI 生成/续写入口创建第一版。</p>
@@ -311,8 +516,24 @@ export default function OutlinePanel({
 
       {!loading && !error && activeTab === "raw" && outline?.content && (
         <section className="outline-raw">
-          <h3>原始 Markdown</h3>
-          <MarkdownView content={outline.content} />
+          <div className="outline-raw-header">
+            <div>
+              <h3>完整 Markdown 原文</h3>
+              {outline.content_source && <p className="outline-raw-source">{outline.content_source}</p>}
+            </div>
+            {!sourceEditing && <button className="btn-secondary" onClick={startSourceEditing}>编辑原文</button>}
+          </div>
+          {sourceEditing ? (
+            <div className="outline-source-edit">
+              <textarea value={sourceDraft} onChange={(event) => setSourceDraft(event.target.value)} />
+              <div className="outline-source-actions">
+                <button className="btn-secondary" onClick={() => setSourceEditing(false)}>取消</button>
+                <button className="btn-primary" onClick={() => void handleSourceSave()}>保存并重建结构</button>
+              </div>
+            </div>
+          ) : (
+            <MarkdownView content={outline.content} />
+          )}
         </section>
       )}
       {!loading && !error && activeTab === "raw" && !outline?.content && (

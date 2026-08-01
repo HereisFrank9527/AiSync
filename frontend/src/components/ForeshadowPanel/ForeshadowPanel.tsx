@@ -1,16 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ForeshadowItem, StoryChapters, StoryForeshadows, StoryOutline } from "../../types";
+import type { ForeshadowItem, StoryChapters, StoryCharacters, StoryForeshadows, StoryOutline } from "../../types";
+import CharacterReferences from "../CharacterReferences";
 import "./ForeshadowPanel.css";
 
 interface ForeshadowPanelProps {
   foreshadows: StoryForeshadows | null;
   outline: StoryOutline | null;
   chapters: StoryChapters | null;
+  characters: StoryCharacters | null;
   loading: boolean;
   saving: boolean;
   error: string;
   onRefresh: () => void;
   onSave: (items: ForeshadowItem[]) => void | Promise<unknown>;
+  onConfirmVerification: (foreshadowId: string) => void | Promise<unknown>;
+  onOpenCharacter: (characterId: string) => void;
 }
 
 const STATUS_OPTIONS = [
@@ -40,6 +44,7 @@ function emptyItem(index: number): ForeshadowItem {
     importance: "medium",
     plant_chapter: "",
     payoff_chapter: "",
+    character_ids: [],
     outline_ids: [],
     related_files: [],
     tags: [],
@@ -67,11 +72,14 @@ export default function ForeshadowPanel({
   foreshadows,
   outline,
   chapters,
+  characters,
   loading,
   saving,
   error,
   onRefresh,
   onSave,
+  onConfirmVerification,
+  onOpenCharacter,
 }: ForeshadowPanelProps) {
   const sourceItems = useMemo(() => foreshadows?.items ?? [], [foreshadows?.items]);
   const [draftItems, setDraftItems] = useState<ForeshadowItem[]>([]);
@@ -79,6 +87,8 @@ export default function ForeshadowPanel({
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [importanceFilter, setImportanceFilter] = useState("");
+  const [verificationFilter, setVerificationFilter] = useState("");
+  const [verificationSavingId, setVerificationSavingId] = useState<string | null>(null);
 
   useEffect(() => {
     setDraftItems(sourceItems.map((item, index) => ({ ...emptyItem(index + 1), ...item })));
@@ -105,6 +115,7 @@ export default function ForeshadowPanel({
     return draftItems.filter((item) => {
       if (statusFilter && item.status !== statusFilter) return false;
       if (importanceFilter && item.importance !== importanceFilter) return false;
+      if (verificationFilter && (item.verification?.status ?? "unknown") !== verificationFilter) return false;
       if (!normalized) return true;
       return [
         item.title,
@@ -116,11 +127,12 @@ export default function ForeshadowPanel({
         item.payoff_chapter,
       ].join("\n").toLowerCase().includes(normalized);
     });
-  }, [draftItems, importanceFilter, query, statusFilter]);
+  }, [draftItems, importanceFilter, query, statusFilter, verificationFilter]);
 
   const changed = JSON.stringify(sourceItems) !== JSON.stringify(draftItems);
   const paidOffCount = draftItems.filter((item) => item.status === "paid_off").length;
   const openCount = draftItems.length - paidOffCount;
+  const reviewCount = draftItems.filter((item) => item.verification?.status === "review").length;
 
   const updateActive = (patch: Partial<ForeshadowItem>) => {
     if (!active) return;
@@ -148,6 +160,16 @@ export default function ForeshadowPanel({
     updateActive({ outline_ids: next });
   };
 
+  const confirmVerification = async () => {
+    if (!active || active.verification?.status !== "review" || verificationSavingId) return;
+    setVerificationSavingId(active.id);
+    try {
+      await onConfirmVerification(active.id);
+    } finally {
+      setVerificationSavingId(null);
+    }
+  };
+
   return (
     <section className="foreshadow-panel">
       <header className="foreshadow-header">
@@ -173,6 +195,7 @@ export default function ForeshadowPanel({
             <div className="foreshadow-stats">
               <div><span>未回收</span><strong>{openCount}</strong></div>
               <div><span>已回收</span><strong>{paidOffCount}</strong></div>
+              <div><span>待复核</span><strong>{reviewCount}</strong></div>
             </div>
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索伏笔" />
             <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
@@ -183,6 +206,13 @@ export default function ForeshadowPanel({
               <option value="">全部重要性</option>
               {IMPORTANCE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
+            <select value={verificationFilter} onChange={(event) => setVerificationFilter(event.target.value)}>
+              <option value="">全部复核状态</option>
+              <option value="unknown">未复核</option>
+              <option value="verified">已核对</option>
+              <option value="review">待复核</option>
+              <option value="confirmed">已确认</option>
+            </select>
             {visibleItems.length === 0 && <p className="foreshadow-muted">没有匹配伏笔</p>}
             {visibleItems.map((item) => (
               <button
@@ -192,6 +222,11 @@ export default function ForeshadowPanel({
               >
                 <strong>{item.title}</strong>
                 <span>{statusLabel(item.status)} · {importanceLabel(item.importance)}</span>
+                {item.verification?.status && item.verification.status !== "unknown" && (
+                  <em className={`foreshadow-verification foreshadow-verification-${item.verification.status}`}>
+                    {item.verification.status === "review" ? "待复核" : item.verification.status === "confirmed" ? "已确认" : "已核对"}
+                  </em>
+                )}
                 {item.tags.length > 0 && <em>{item.tags.join(" / ")}</em>}
               </button>
             ))}
@@ -207,6 +242,22 @@ export default function ForeshadowPanel({
                   </div>
                   <button className="btn-danger" onClick={removeActive}>删除</button>
                 </div>
+                {active.verification && active.verification.status !== "unknown" && (
+                  <section className={`foreshadow-verification-box foreshadow-verification-box-${active.verification.status}`}>
+                    <div>
+                      <strong>
+                        {active.verification.status === "review" ? "待复核" : active.verification.status === "confirmed" ? "已确认" : "已核对"}
+                      </strong>
+                      {active.verification.chapter_path && <span>{active.verification.chapter_path}</span>}
+                    </div>
+                    {active.verification.issues?.length ? <p>{active.verification.issues.join("；")}</p> : <p>正文证据与伏笔记录已通过自动核对。</p>}
+                    {active.verification.status === "review" && (
+                      <button className="btn-secondary" onClick={() => void confirmVerification()} disabled={verificationSavingId === active.id}>
+                        {verificationSavingId === active.id ? "确认中" : "标记为已确认"}
+                      </button>
+                    )}
+                  </section>
+                )}
                 <div className="foreshadow-form-grid">
                   <label>
                     <span>标题</span>
@@ -253,6 +304,16 @@ export default function ForeshadowPanel({
                     <span>相关文件（每行一个路径）</span>
                     <textarea rows={3} value={joinLines(active.related_files)} onChange={(event) => updateActive({ related_files: splitLines(event.target.value) })} />
                   </label>
+                  <div className="foreshadow-form-wide">
+                    <CharacterReferences
+                      characters={characters}
+                      selectedIds={active.character_ids}
+                      label="关联人物"
+                      disabled={saving}
+                      onChange={(characterIds) => updateActive({ character_ids: characterIds })}
+                      onOpenCharacter={onOpenCharacter}
+                    />
+                  </div>
                   <div className="foreshadow-form-wide">
                     <span className="foreshadow-label">关联大纲节点</span>
                     <div className="foreshadow-outline-options">

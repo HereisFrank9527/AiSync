@@ -28,9 +28,18 @@ class LLMParams(BaseModel):
     api_base: str | None = None
     model_name: str = "claude-opus-4-7"
     max_tokens: int = 16000
+    request_timeout: int = 120
+    context_window: Literal["economy", "standard", "long", "maximum"] = "standard"
     effort: Literal["low", "medium", "high", "xhigh", "max"] = "high"
     enable_thinking: bool = True
     prompt_cache: bool = True
+    native_web_search: bool = False
+    web_search_provider: Literal["auto", "tavily", "bing", "native"] = "auto"
+    tavily_api_key: str | None = None
+    tavily_api_key_env: str = "TAVILY_API_KEY"
+    tavily_search_depth: Literal["basic", "advanced"] = "basic"
+    web_search_max_results: int = Field(default=5, ge=1, le=20)
+    tavily_include_raw_content: bool = False
 
 
 class AgentBehavior(BaseModel):

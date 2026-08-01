@@ -1,10 +1,16 @@
 {
+  "name": "aisync",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
-    "build": "npm --prefix frontend run tauri -- build && npm run release:summary",
-    "dev": "npm --prefix frontend run tauri -- dev",
+    "build": "npm run web:build",
+    "dev": "npm run dev:lan",
+    "dev:lan": "powershell -ExecutionPolicy Bypass -File scripts/dev_lan.ps1",
     "build:frontend": "npm --prefix frontend run build",
-    "release:summary": "powershell -ExecutionPolicy Bypass -File scripts/release_summary.ps1",
-    "smoke:installed": "powershell -ExecutionPolicy Bypass -File scripts/smoke_installed_app.ps1"
+    "web:build": "npm run build:frontend",
+    "web:start": "powershell -ExecutionPolicy Bypass -File scripts/web_start.ps1",
+    "web": "npm run web:build && npm run web:start",
+    "release:check": "powershell -ExecutionPolicy Bypass -File scripts/check_release.ps1",
+    "release:web": "powershell -ExecutionPolicy Bypass -File scripts/build_web_release.ps1"
   }
 }

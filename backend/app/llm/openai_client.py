@@ -8,6 +8,7 @@ from openai import AsyncOpenAI, OpenAIError
 
 from app.core.config import Settings
 from app.llm.types import ChatRequest, ChatResponse, TextDeltaCallback
+from app.llm.web_sources import extract_openai_web_sources, merge_web_sources
 
 
 class OpenAICompatibleLLMClient:
@@ -30,9 +31,23 @@ class OpenAICompatibleLLMClient:
             messages = [{"role": "system", "content": system_text}, *messages]
 
         tools_param = [self._to_openai_tool(t) for t in request.tools] if request.tools else None
-        params = self._chat_params(messages, tools_param, request.max_tokens)
+        disable_thinking_for_incomplete_history = self._should_disable_thinking_for_incomplete_tool_history(messages)
+        if disable_thinking_for_incomplete_history:
+            messages = [
+                {key: value for key, value in message.items() if key != "reasoning_content"}
+                if message.get("role") == "assistant"
+                else message
+                for message in messages
+            ]
+        params = self._chat_params(
+            messages,
+            tools_param,
+            request.max_tokens or self.settings.llm_max_tokens,
+            disable_thinking=disable_thinking_for_incomplete_history,
+            native_web_search=request.native_web_search,
+        )
 
-        stream = request.stream and on_text_delta and not self._should_disable_streaming_for_reasoning_tools(request)
+        stream = bool(request.stream and on_text_delta)
         if stream and on_text_delta:
             response = await self.client.chat.completions.create(
                 **params,
@@ -42,17 +57,32 @@ class OpenAICompatibleLLMClient:
             tool_call_buffers: dict[int, dict[str, Any]] = {}
             text_parts: list[str] = []
             reasoning_parts: list[str] = []
+            stop_reason: str | None = None
+            usage: dict[str, int] = {}
+            web_sources = []
             async for chunk in response:
                 chunks.append(chunk)
                 delta = chunk.choices[0].delta if chunk.choices else None
+                if chunk.choices and chunk.choices[0].finish_reason:
+                    stop_reason = chunk.choices[0].finish_reason
+                chunk_usage = self._usage(chunk)
+                if chunk_usage:
+                    usage = chunk_usage
                 if delta and delta.content:
                     text_parts.append(delta.content)
                     await on_text_delta(delta.content)
                 if delta:
+                    web_sources = merge_web_sources(
+                        web_sources,
+                        extract_openai_web_sources(delta, chunk),
+                    )
+                if delta:
                     reasoning_delta = self._extract_reasoning_content(delta)
                     if reasoning_delta:
                         reasoning_parts.append(reasoning_delta)
+                        await on_text_delta("")
                 if delta and delta.tool_calls:
+                    await on_text_delta("")
                     for tc in delta.tool_calls:
                         idx = tc.index
                         if idx not in tool_call_buffers:
@@ -71,12 +101,16 @@ class OpenAICompatibleLLMClient:
                 except (json.JSONDecodeError, TypeError):
                     args = {}
                 normalized.append({"id": buf["id"], "name": buf["name"], "input": args})
+            if stop_reason is None:
+                stop_reason = "stream_incomplete"
             return ChatResponse(
                 content=chunks,
                 text="".join(text_parts),
                 reasoning_content="".join(reasoning_parts),
                 tool_calls=normalized,
-                stop_reason=None,
+                stop_reason=stop_reason,
+                usage=usage,
+                web_sources=web_sources,
                 raw=chunks,
             )
         else:
@@ -100,8 +134,25 @@ class OpenAICompatibleLLMClient:
                 reasoning_content=reasoning_content,
                 tool_calls=normalized,
                 stop_reason=response.choices[0].finish_reason,
+                usage=self._usage(response),
+                web_sources=extract_openai_web_sources(message, response),
                 raw=response,
             )
+
+    def _usage(self, response: Any) -> dict[str, int]:
+        usage = getattr(response, "usage", None)
+        if not usage:
+            return {}
+        result: dict[str, int] = {}
+        for source, target in (
+            ("prompt_tokens", "input_tokens"),
+            ("completion_tokens", "output_tokens"),
+            ("total_tokens", "total_tokens"),
+        ):
+            value = getattr(usage, source, None)
+            if isinstance(value, int):
+                result[target] = value
+        return result
 
     def _prepare_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Convert agent-internal (Anthropic-style) messages to OpenAI chat format.
@@ -165,6 +216,8 @@ class OpenAICompatibleLLMClient:
         messages: list[dict[str, Any]],
         tools_param: list[dict[str, Any]] | None,
         max_tokens: int,
+        disable_thinking: bool = False,
+        native_web_search: bool | None = None,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {
             "model": self.settings.llm_model_name,
@@ -173,16 +226,34 @@ class OpenAICompatibleLLMClient:
         }
         if tools_param:
             params["tools"] = tools_param
+        web_search_enabled = self.settings.llm_native_web_search if native_web_search is None else native_web_search
+        if web_search_enabled:
+            # OpenAI Chat Completions exposes native search through this
+            # provider-specific option. Unsupported models will reject it.
+            params["web_search_options"] = {}
+        thinking_enabled = self.settings.llm_enable_thinking and not disable_thinking
         if self._is_deepseek_thinking_model():
             params["extra_body"] = {
-                "thinking": {"type": "enabled" if self.settings.llm_enable_thinking else "disabled"}
+                "thinking": {"type": "enabled" if thinking_enabled else "disabled"}
             }
-            if self.settings.llm_enable_thinking:
+            if thinking_enabled:
                 params["reasoning_effort"] = self._deepseek_reasoning_effort()
+        elif thinking_enabled and self._supports_reasoning_effort():
+            params["reasoning_effort"] = self._openai_reasoning_effort()
         return params
 
-    def _should_disable_streaming_for_reasoning_tools(self, request: ChatRequest) -> bool:
-        return bool(request.tools and self._should_replay_reasoning_content())
+    def _should_disable_thinking_for_incomplete_tool_history(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> bool:
+        if not self._should_replay_reasoning_content():
+            return False
+        return any(
+            message.get("role") == "assistant"
+            and message.get("tool_calls")
+            and not str(message.get("reasoning_content") or "").strip()
+            for message in messages
+        )
 
     def _extract_reasoning_content(self, value: Any) -> str:
         direct = getattr(value, "reasoning_content", None)
@@ -219,9 +290,20 @@ class OpenAICompatibleLLMClient:
 
     def _deepseek_reasoning_effort(self) -> str:
         effort = self.settings.llm_effort
-        if effort in {"max", "xhigh"}:
-            return "max"
-        return "high"
+        return effort if effort in {"low", "medium", "high"} else "high"
+
+    def _supports_reasoning_effort(self) -> bool:
+        provider = str(getattr(self.settings, "llm_provider", "") or "").lower()
+        model = self.settings.llm_model_name.lower().strip()
+        if provider not in {"openai", "custom"}:
+            return False
+        return model.startswith(("o1", "o3", "o4", "gpt-5")) or "reasoner" in model
+
+    def _openai_reasoning_effort(self) -> str:
+        effort = self.settings.llm_effort
+        if effort == "max":
+            return "xhigh"
+        return effort if effort in {"low", "medium", "high", "xhigh"} else "high"
 
     def _to_openai_tool(self, tool: dict[str, Any]) -> dict[str, Any]:
         return {

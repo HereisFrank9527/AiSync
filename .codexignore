@@ -9,6 +9,7 @@ __pycache__/
 *.egg-info/
 .eggs/
 .pytest_cache/
+.pytest-tmp/
 .ruff_cache/
 .mypy_cache/
 .coverage
@@ -36,17 +37,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# ===== Rust / Tauri generated =====
-target/
-**/target/
-frontend/src-tauri/gen/
-frontend/src-tauri/.tauri/
-frontend/src-tauri/Cargo.lock.tmp
-frontend/src-tauri/resources/backend/*
-!frontend/src-tauri/resources/backend/.gitkeep
-frontend/src-tauri/resources/backend-src/
-frontend/src-tauri/resources/runtime/
+# ===== Local runtime cache =====
 .runtime-cache/
+.release/
 
 # ===== App runtime / user projects =====
 presets.json

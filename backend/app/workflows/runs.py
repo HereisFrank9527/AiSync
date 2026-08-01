@@ -10,7 +10,17 @@ from pydantic import BaseModel, Field
 
 WorkflowRunStatus = Literal["draft", "running", "paused", "completed", "failed", "cancelled"]
 WorkflowStepStatus = Literal["pending", "running", "waiting_user", "completed", "failed", "skipped"]
-WorkflowStepKind = Literal["plan", "context", "draft", "revise", "check", "write_file", "user_confirm", "custom"]
+WorkflowStepKind = Literal[
+    "plan",
+    "context",
+    "draft",
+    "revise",
+    "check",
+    "write_file",
+    "chapter",
+    "user_confirm",
+    "custom",
+]
 
 
 def utc_now() -> str:
@@ -90,7 +100,8 @@ class WorkflowRunStore:
         now = utc_now()
         steps = []
         for step in data.steps:
-            steps.append(step.model_copy(update={"updated_at": now}))
+            step_record = step if isinstance(step, WorkflowStepRecord) else WorkflowStepRecord.model_validate(step)
+            steps.append(step_record.model_copy(update={"updated_at": now}))
         record = WorkflowRunRecord(
             workflow_type=data.workflow_type,
             title=data.title.strip() or "未命名工作流",
@@ -158,13 +169,54 @@ class WorkflowRunStore:
             if data.status in {"running", "waiting_user"}:
                 record.current_step_id = step.step_id
         for field_name in ["preset_id", "prompt_pack_ids", "context_pack_ids", "input", "output", "output_path", "error"]:
-            value = getattr(data, field_name)
-            if value is not None:
-                setattr(step, field_name, value)
+            if field_name in data.model_fields_set:
+                setattr(step, field_name, getattr(data, field_name))
         step.updated_at = utc_now()
         record.updated_at = step.updated_at
         self.save(record)
         return record
+
+    def add_step(self, run_id: str, data: WorkflowStepRecord) -> WorkflowRunRecord:
+        record = self.load(run_id)
+        step = data.model_copy(update={"updated_at": utc_now()})
+        record.steps.append(step)
+        if record.current_step_id is None:
+            record.current_step_id = step.step_id
+        record.updated_at = step.updated_at
+        self.save(record)
+        return record
+
+    def delete_step(self, run_id: str, step_id: str) -> WorkflowRunRecord:
+        record = self.load(run_id)
+        original_len = len(record.steps)
+        record.steps = [step for step in record.steps if step.step_id != step_id]
+        if len(record.steps) == original_len:
+            raise ValueError(f"Workflow step not found: {step_id}")
+        if record.current_step_id == step_id:
+            next_pending = next((step for step in record.steps if step.status in {"pending", "running", "waiting_user"}), None)
+            record.current_step_id = next_pending.step_id if next_pending else (record.steps[0].step_id if record.steps else None)
+        record.updated_at = utc_now()
+        self.save(record)
+        return record
+
+    def reset_step(self, run_id: str, step_id: str) -> WorkflowRunRecord:
+        record = self.load(run_id)
+        step = self._ensure_step(record, step_id)
+        step.status = "pending"
+        step.error = None
+        step.started_at = None
+        step.finished_at = None
+        step.updated_at = utc_now()
+        record.current_step_id = step.step_id
+        record.status = "draft"
+        record.finished_at = None
+        record.updated_at = step.updated_at
+        self.save(record)
+        return record
+
+    def skip_step(self, run_id: str, step_id: str) -> WorkflowRunRecord:
+        self.update_step(run_id, step_id, WorkflowStepUpdate(status="skipped", error=None))
+        return self.advance_to_next_step(run_id, step_id)
 
     def advance_to_next_step(self, run_id: str, current_step_id: str) -> WorkflowRunRecord:
         record = self.load(run_id)
@@ -184,6 +236,13 @@ class WorkflowRunStore:
     def save(self, record: WorkflowRunRecord) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         self._path(record.run_id).write_text(record.model_dump_json(indent=2), encoding="utf-8")
+
+    def delete(self, run_id: str) -> bool:
+        path = self._path(run_id)
+        if not path.exists():
+            return False
+        path.unlink()
+        return True
 
     def _path(self, run_id: str) -> Path:
         if not run_id or "/" in run_id or "\\" in run_id or ".." in run_id:

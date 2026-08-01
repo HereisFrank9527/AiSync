@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.projects.context import ProjectContext
 from app.tools.base import ToolResult
 from app.tools.factory import create_tool_registry
+from app.tools.settings import configured_default_preset_id, load_tool_settings, save_tool_settings
 
 router = APIRouter(prefix="/tools", tags=["tools"])
 
@@ -72,35 +73,6 @@ async def load_tool_runs(context: ProjectContext) -> list[dict[str, Any]]:
         except Exception:
             continue
     return sorted(runs, key=lambda item: str(item.get("started_at", "")), reverse=True)
-
-
-async def load_tool_settings(context: ProjectContext) -> dict[str, Any]:
-    path = ".aisync/tool_settings.json"
-    if not await context.exists(path):
-        return {"tools": {}}
-    try:
-        data = await context.read_json(path)
-    except Exception:
-        return {"tools": {}}
-    if not isinstance(data, dict):
-        return {"tools": {}}
-    tools = data.get("tools")
-    if not isinstance(tools, dict):
-        data["tools"] = {}
-    return data
-
-
-async def save_tool_settings(context: ProjectContext, settings_data: dict[str, Any]) -> None:
-    await context.write_json(".aisync/tool_settings.json", settings_data)
-
-
-async def configured_default_preset_id(context: ProjectContext, tool_name: str, code_default: str | None) -> str | None:
-    settings_data = await load_tool_settings(context)
-    entry = settings_data.get("tools", {}).get(tool_name)
-    if isinstance(entry, dict) and "default_preset_id" in entry:
-        value = entry.get("default_preset_id")
-        return str(value) if value else None
-    return code_default
 
 
 async def descriptors_with_settings(context: ProjectContext) -> list[dict[str, Any]]:

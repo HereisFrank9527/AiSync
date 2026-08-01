@@ -62,9 +62,45 @@ export function useOutline(projectPath: string | null) {
     }
   }, [projectPath]);
 
+  const saveSource = useCallback(async (content: string) => {
+    if (!projectPath) return null;
+    setLoading(true);
+    try {
+      const data = await api.put<StoryOutline>("/story/outline/source", {
+        project_path: projectPath,
+        content,
+      });
+      setOutline(data);
+      setError("");
+      return data;
+    } catch {
+      setError("无法保存大纲原文");
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, [projectPath]);
+
+  const saveCharacters = useCallback(async (nodeId: string, characterIds: string[]) => {
+    if (!projectPath) return null;
+    try {
+      const data = await api.put<{ node_id: string; character_ids: string[] }>("/story/outline/characters", {
+        project_path: projectPath,
+        node_id: nodeId,
+        character_ids: characterIds,
+      });
+      await refresh();
+      setError("");
+      return data;
+    } catch {
+      setError("无法保存大纲人物关联");
+      return null;
+    }
+  }, [projectPath, refresh]);
+
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  return { outline, loading, error, refresh, save, importMarkdown };
+  return { outline, loading, error, refresh, save, importMarkdown, saveSource, saveCharacters };
 }

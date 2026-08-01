@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
-import type { ProjectPromptPackSettings, PromptPack, PromptPackCreate, PromptPackUpdate } from "../types";
+import type { ProjectPromptPackSettings, PromptPack, PromptPackCreate, PromptPackExample, PromptPackUpdate } from "../types";
 
 export function usePromptPacks(projectPath: string | null = null) {
   const [packs, setPacks] = useState<PromptPack[]>([]);
   const [projectSettings, setProjectSettings] = useState<ProjectPromptPackSettings>({ mode: "global", enabled_pack_ids: [] });
+  const [examples, setExamples] = useState<PromptPackExample[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -12,7 +13,9 @@ export function usePromptPacks(projectPath: string | null = null) {
     setLoading(true);
     try {
       const nextPacks = await api.get<PromptPack[]>("/prompt-packs");
+      const nextExamples = await api.get<PromptPackExample[]>("/prompt-packs/examples");
       setPacks(nextPacks);
+      setExamples(nextExamples);
       if (projectPath) {
         const settings = await api.get<ProjectPromptPackSettings>(
           `/prompt-packs/project-settings?project_path=${encodeURIComponent(projectPath)}`,
@@ -55,6 +58,12 @@ export function usePromptPacks(projectPath: string | null = null) {
     return pack;
   }, [refresh]);
 
+  const createFromExample = useCallback(async (exampleId: string) => {
+    const pack = await api.post<PromptPack>(`/prompt-packs/examples/${exampleId}`, {});
+    await refresh();
+    return pack;
+  }, [refresh]);
+
   const remove = useCallback(async (id: string) => {
     await api.del(`/prompt-packs/${id}`);
     await refresh();
@@ -73,5 +82,5 @@ export function usePromptPacks(projectPath: string | null = null) {
     return saved;
   }, [projectPath]);
 
-  return { packs, projectSettings, loading, error, refresh, create, update, copy, remove, updateProjectSettings };
+  return { packs, examples, projectSettings, loading, error, refresh, create, createFromExample, update, copy, remove, updateProjectSettings };
 }

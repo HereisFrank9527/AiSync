@@ -11,11 +11,21 @@
 
 /* ── 目录节点 ── */
 
+.file-tree-dir-header {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  gap: 4px;
+}
+
 .file-tree-dir-toggle {
   display: flex;
   align-items: center;
   gap: 4px;
-  width: calc(100% - 48px);
+  flex: 1;
+  width: auto;
+  min-width: 0;
   padding: 4px var(--space-sm);
   border-radius: var(--radius-sm);
   background: transparent;
@@ -71,22 +81,34 @@
   font-weight: 600;
 }
 
+.file-tree-dir-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 2px;
+  padding-right: 2px;
+}
+
 .file-tree-action {
-  float: right;
-  width: 42px;
+  width: auto;
+  min-width: 42px;
   min-height: 24px;
-  margin-top: -26px;
-  margin-right: 2px;
   padding: 2px 4px;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-tertiary);
   font-size: 11px;
+  white-space: nowrap;
 }
 
 .file-tree-action:hover {
   background: var(--color-bg-hover);
   color: var(--color-text);
+}
+
+.file-tree-action--danger:hover {
+  color: var(--color-danger, #b42318);
+  background: rgba(180, 35, 24, 0.08);
 }
 
 .file-tree-dir-children {

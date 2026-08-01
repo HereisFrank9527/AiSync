@@ -1,19 +1,61 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.agent import router as agent_router
+from app.api.change_sets import router as change_sets_router
 from app.api.config import router as config_router
 from app.api.conversations import router as conversations_router
 from app.api.presets import router as presets_router
 from app.api.prompt_packs import router as prompt_packs_router
 from app.api.projects import router as projects_router
 from app.api.story import router as story_router
+from app.api.system_rules import router as system_rules_router
 from app.api.tools import router as tools_router
 from app.api.vector import router as vector_router
 from app.api.workflows import router as workflows_router
 from app.core.config import settings
+
+
+def frontend_dist_dir() -> Path | None:
+    repo_root = Path(__file__).resolve().parents[2]
+    candidates = [
+        repo_root / "frontend" / "dist",
+        repo_root.parent / "frontend" / "dist",
+    ]
+    return next((path for path in candidates if (path / "index.html").exists()), None)
+
+
+def mount_frontend(app: FastAPI) -> None:
+    dist_dir = frontend_dist_dir()
+    if not dist_dir:
+        return
+
+    assets_dir = dist_dir / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+
+    @app.get("/", include_in_schema=False)
+    async def frontend_index() -> FileResponse:
+        return FileResponse(dist_dir / "index.html")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    async def frontend_spa_fallback(path: str) -> FileResponse:
+        if path.startswith(("api/", "docs", "openapi.json", "health")):
+            raise HTTPException(status_code=404)
+        file_path = (dist_dir / path).resolve()
+        try:
+            file_path.relative_to(dist_dir.resolve())
+        except ValueError:
+            raise HTTPException(status_code=404) from None
+        if file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(dist_dir / "index.html")
 
 
 def create_app() -> FastAPI:
@@ -27,10 +69,12 @@ def create_app() -> FastAPI:
     )
     app.include_router(projects_router, prefix="/api")
     app.include_router(agent_router, prefix="/api")
+    app.include_router(change_sets_router, prefix="/api")
     app.include_router(config_router, prefix="/api")
     app.include_router(conversations_router, prefix="/api")
     app.include_router(presets_router, prefix="/api")
     app.include_router(prompt_packs_router, prefix="/api")
+    app.include_router(system_rules_router, prefix="/api")
     app.include_router(tools_router, prefix="/api")
     app.include_router(vector_router, prefix="/api")
     app.include_router(workflows_router, prefix="/api")
@@ -39,6 +83,8 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    mount_frontend(app)
 
     return app
 
@@ -49,4 +95,4 @@ app = create_app()
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=False)
+    uvicorn.run("app.main:app", host="127.0.0.1", port=27631, reload=False)

@@ -248,6 +248,73 @@ button:disabled {
   overflow: hidden;
 }
 
+.project-onboarding {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--space-xl);
+  background: var(--color-bg);
+}
+
+.project-onboarding-panel {
+  width: min(520px, 100%);
+  display: grid;
+  justify-items: center;
+  gap: var(--space-md);
+  text-align: center;
+}
+
+.project-onboarding-mark {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
+.project-onboarding-panel h2 {
+  margin: 0;
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+}
+
+.project-onboarding-panel p {
+  max-width: 440px;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.project-onboarding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-sm);
+}
+
+.project-onboarding-actions button {
+  min-width: 104px;
+}
+
+.project-onboarding-error {
+  max-width: 460px;
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+}
+
+.project-onboarding-muted {
+  color: var(--color-text-tertiary) !important;
+  font-size: var(--font-size-xs) !important;
+}
+
+.project-onboarding-file {
+  display: none;
+}
+
 /* ── 聊天工作区 ── */
 
 .chat-workspace {
@@ -350,4 +417,78 @@ button:disabled {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-tertiary);
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+
+  .files-sidebar {
+    width: 220px;
+    min-width: 220px;
+  }
+}
+
+@media (max-width: 700px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .main-content {
+    grid-column: 1;
+    grid-row: 2;
+    min-height: 0;
+    overflow: hidden;
+    padding-bottom: 0;
+  }
+
+  .project-onboarding {
+    padding: var(--space-md);
+  }
+
+  .project-onboarding-actions {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .project-onboarding-actions button {
+    width: 100%;
+  }
+
+  .chat-workspace,
+  .files-workspace {
+    height: 100%;
+    min-height: 0;
+    flex-direction: column;
+  }
+
+  .chat-workspace-main {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .files-sidebar {
+    width: 100%;
+    min-width: 0;
+    max-height: 30dvh;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .files-sidebar-header {
+    padding: var(--space-xs) var(--space-md);
+  }
+
+  .files-editor {
+    min-height: 0;
+  }
+
+  .view-status {
+    padding: var(--space-md);
+  }
 }

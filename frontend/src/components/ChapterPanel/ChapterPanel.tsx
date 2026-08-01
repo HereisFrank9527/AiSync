@@ -4,6 +4,7 @@ import type {
   StoryChapter,
   StoryChapterMetadataUpdate,
   StoryChapters,
+  StoryCharacters,
   StoryForeshadows,
   StoryOutline,
   ToolDescriptor,
@@ -11,12 +12,14 @@ import type {
   VectorSearchResult,
 } from "../../types";
 import MarkdownView from "../MarkdownView";
+import CharacterReferences from "../CharacterReferences";
 import "./ChapterPanel.css";
 
 interface ChapterPanelProps {
   chapters: StoryChapters | null;
   outline: StoryOutline | null;
   foreshadows: StoryForeshadows | null;
+  characters: StoryCharacters | null;
   loading: boolean;
   saving: boolean;
   error: string;
@@ -33,6 +36,7 @@ interface ChapterPanelProps {
   onVectorRebuild: () => void | Promise<unknown>;
   onOpenTool: (tool: ToolDescriptor, initialParams?: Record<string, unknown>) => void;
   onOpenFile: (path: string) => void;
+  onOpenCharacter: (characterId: string) => void;
 }
 
 const STATUS_OPTIONS = [
@@ -41,6 +45,8 @@ const STATUS_OPTIONS = [
   { value: "revising", label: "修订中" },
   { value: "done", label: "已完成" },
 ];
+
+const STATUS_LABELS = Object.fromEntries(STATUS_OPTIONS.map((item) => [item.value, item.label]));
 
 const FORESHADOW_STATUS_LABELS: Record<string, string> = {
   planned: "计划埋",
@@ -63,6 +69,10 @@ function formatNumber(value: number) {
 function progressWidth(done: number, target: number) {
   if (!target) return "0%";
   return `${Math.min(Math.round((done / target) * 100), 100)}%`;
+}
+
+function chapterStatusLabel(value: string) {
+  return STATUS_LABELS[value] ?? (value || "草稿");
 }
 
 function chapterVectorQuery(chapter: StoryChapter) {
@@ -157,6 +167,7 @@ export default function ChapterPanel({
   chapters,
   outline,
   foreshadows,
+  characters,
   loading,
   saving,
   error,
@@ -173,6 +184,7 @@ export default function ChapterPanel({
   onVectorRebuild,
   onOpenTool,
   onOpenFile,
+  onOpenCharacter,
 }: ChapterPanelProps) {
   const writeTool = tools.find((tool) => tool.name === "write_chapter");
   const editTool = tools.find((tool) => tool.name === "edit_chapter");
@@ -189,6 +201,8 @@ export default function ChapterPanel({
     return titles;
   }, [outlineItems]);
   const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sortMode, setSortMode] = useState("path");
   const [activePath, setActivePath] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [metadataDraft, setMetadataDraft] = useState<StoryChapterMetadataUpdate>({
@@ -197,15 +211,29 @@ export default function ChapterPanel({
     target_characters: 0,
     revision: 0,
     outline_id: "",
+    character_ids: [],
   });
   const [editing, setEditing] = useState(false);
   const [showVectorResults, setShowVectorResults] = useState(false);
+  const [mobileSection, setMobileSection] = useState<"reader" | "chapters" | "info">("reader");
   const visibleItems = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    if (!normalized) return items;
-    return items.filter((item) => `${item.path}\n${item.title}\n${item.summary}\n${item.content}`.toLowerCase().includes(normalized));
-  }, [items, query]);
+    const filtered = items.filter((item) => {
+      if (statusFilter !== "all" && (item.status || "draft") !== statusFilter) return false;
+      if (!normalized) return true;
+      return `${item.path}\n${item.title}\n${item.summary}\n${item.content}`.toLowerCase().includes(normalized);
+    });
+    return [...filtered].sort((a, b) => {
+      if (sortMode === "characters_desc") return b.characters - a.characters || a.path.localeCompare(b.path, "zh-Hans-CN");
+      if (sortMode === "characters_asc") return a.characters - b.characters || a.path.localeCompare(b.path, "zh-Hans-CN");
+      if (sortMode === "status") return chapterStatusLabel(a.status).localeCompare(chapterStatusLabel(b.status), "zh-Hans-CN") || a.path.localeCompare(b.path, "zh-Hans-CN");
+      if (sortMode === "revision") return b.revision - a.revision || a.path.localeCompare(b.path, "zh-Hans-CN");
+      return a.path.localeCompare(b.path, "zh-Hans-CN", { numeric: true });
+    });
+  }, [items, query, sortMode, statusFilter]);
   const active = items.find((item) => item.path === activePath) ?? visibleItems[0] ?? null;
+  const completedCount = items.filter((item) => item.status === "done").length;
+  const draftCount = items.filter((item) => item.status !== "done").length;
   const relatedForeshadows = useMemo(() => {
     if (!active) return { planting: [], payoff: [], outline: [], related: [], all: [] };
     const planting = foreshadowItems.filter((item) => item.plant_chapter === active.path);
@@ -237,6 +265,7 @@ export default function ChapterPanel({
       target_characters: active.target_characters || 0,
       revision: active.revision || 0,
       outline_id: active.outline_id || "",
+      character_ids: active.character_ids || [],
     });
     setShowVectorResults(false);
   }, [active]);
@@ -247,7 +276,8 @@ export default function ChapterPanel({
     metadataDraft.summary !== active.summary ||
     Number(metadataDraft.target_characters || 0) !== active.target_characters ||
     Number(metadataDraft.revision || 0) !== active.revision ||
-    metadataDraft.outline_id !== active.outline_id
+    metadataDraft.outline_id !== active.outline_id ||
+    metadataDraft.character_ids.join("\n") !== (active.character_ids || []).join("\n")
   ));
   const setMetadataField = <K extends keyof StoryChapterMetadataUpdate>(key: K, value: StoryChapterMetadataUpdate[K]) => {
     setMetadataDraft((current) => ({ ...current, [key]: value }));
@@ -259,7 +289,7 @@ export default function ChapterPanel({
   };
 
   return (
-    <section className="chapter-panel">
+    <section className={`chapter-panel chapter-mobile-view-${mobileSection}`}>
       <header className="chapter-header">
         <div>
           <h2>章节管理</h2>
@@ -276,13 +306,83 @@ export default function ChapterPanel({
       {error && <p className="chapter-error">{error}</p>}
 
       {!loading && !error && (
+        <>
+        <nav className="chapter-mobile-tabs" aria-label="章节页面">
+          <button
+            className={mobileSection === "reader" ? "active" : ""}
+            onClick={() => setMobileSection("reader")}
+            aria-pressed={mobileSection === "reader"}
+          >
+            正文
+          </button>
+          <button
+            className={mobileSection === "chapters" ? "active" : ""}
+            onClick={() => setMobileSection("chapters")}
+            aria-pressed={mobileSection === "chapters"}
+          >
+            目录
+          </button>
+          <button
+            className={mobileSection === "info" ? "active" : ""}
+            onClick={() => setMobileSection("info")}
+            aria-pressed={mobileSection === "info"}
+          >
+            信息
+          </button>
+        </nav>
+        <section className="chapter-overview-strip" aria-label="章节概览">
+          <div>
+            <span>章节</span>
+            <strong>{items.length}</strong>
+          </div>
+          <div>
+            <span>已完成</span>
+            <strong>{completedCount}</strong>
+          </div>
+          <div>
+            <span>进行中</span>
+            <strong>{draftCount}</strong>
+          </div>
+          <div>
+            <span>正文字符</span>
+            <strong>{formatNumber(chapters?.total_characters ?? 0)}</strong>
+          </div>
+        </section>
         <div className="chapter-layout">
           <aside className="chapter-list">
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索章节"
-            />
+            <div className="chapter-list-head">
+              <div>
+                <strong>章节索引</strong>
+                <span>{visibleItems.length} / {items.length}</span>
+              </div>
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="搜索章节"
+              />
+              <label className="chapter-sort-select">
+                <span>排序</span>
+                <select value={sortMode} onChange={(event) => setSortMode(event.target.value)}>
+                  <option value="path">章节顺序</option>
+                  <option value="characters_desc">字数多到少</option>
+                  <option value="characters_asc">字数少到多</option>
+                  <option value="status">状态</option>
+                  <option value="revision">修订轮次</option>
+                </select>
+              </label>
+              <div className="chapter-filter-row" aria-label="章节状态筛选">
+                <button className={statusFilter === "all" ? "active" : ""} onClick={() => setStatusFilter("all")}>全部</button>
+                {STATUS_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    className={statusFilter === option.value ? "active" : ""}
+                    onClick={() => setStatusFilter(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             {visibleItems.length === 0 && <p className="chapter-muted">没有匹配章节</p>}
             {visibleItems.map((item) => (
               <button
@@ -291,11 +391,15 @@ export default function ChapterPanel({
                 onClick={() => {
                   setActivePath(item.path);
                   setEditing(false);
+                  setMobileSection("reader");
                 }}
               >
-                <strong>{item.title}</strong>
+                <div>
+                  <strong>{item.title}</strong>
+                  <mark className={`chapter-status is-${item.status || "draft"}`}>{chapterStatusLabel(item.status)}</mark>
+                </div>
                 <span>{item.path}</span>
-                <em>{formatNumber(item.characters)} 字符</em>
+                <em>{formatNumber(item.characters)} 字符 · 修订 {item.revision}</em>
                 {item.outline_id && <small>{outlineTitleById.get(item.outline_id) ?? "已关联大纲"}</small>}
               </button>
             ))}
@@ -304,61 +408,92 @@ export default function ChapterPanel({
           <section className="chapter-detail">
             {active ? (
               <>
-                <div className="chapter-detail-heading">
-                  <div>
-                    <h3>{active.title}</h3>
-                    <p>
-                      {active.path}
-                      {active.outline_id && ` · 大纲：${outlineTitleById.get(active.outline_id) ?? active.outline_id}`}
-                    </p>
-                  </div>
-                  <div className="chapter-detail-actions">
-                    <button className="btn-secondary" onClick={() => onOpenFile(active.path)}>打开文件</button>
-                    <button className="btn-secondary" onClick={() => setEditing((value) => !value)}>
-                      {editing ? "预览" : "编辑"}
-                    </button>
-                    <button
-                      className="btn-primary"
-                      disabled={!changed || saving}
-                      onClick={() => void onSaveDocument(active.path, draft)}
-                    >
-                      {saving ? "保存中" : "保存"}
-                    </button>
-                  </div>
-                </div>
-                {active.summary && (
-                  <div className="chapter-summary">
-                    <strong>摘要</strong>
-                    <p>{active.summary}</p>
-                  </div>
-                )}
-                {relatedForeshadows.all.length > 0 && (
-                  <section className="chapter-foreshadow-panel">
-                    <header>
-                      <div>
-                        <h4>相关伏笔</h4>
-                        <p>
-                          {relatedForeshadows.payoff.length} 个计划回收 · {relatedForeshadows.planting.length} 个埋设 · {relatedForeshadows.outline.length} 个大纲关联
-                        </p>
+                <section className="chapter-reading-pane">
+                  <div className="chapter-detail-heading">
+                    <div>
+                      <div className="chapter-title-row">
+                        <h3>{active.title}</h3>
+                        <mark className={`chapter-status is-${active.status || "draft"}`}>{chapterStatusLabel(active.status)}</mark>
                       </div>
-                    </header>
-                    <div className="chapter-foreshadow-groups">
-                      {relatedForeshadows.payoff.length > 0 && (
-                        <ForeshadowGroup title="本章计划回收" items={relatedForeshadows.payoff} />
-                      )}
-                      {relatedForeshadows.planting.length > 0 && (
-                        <ForeshadowGroup title="本章埋设" items={relatedForeshadows.planting} />
-                      )}
-                      {relatedForeshadows.outline.length > 0 && (
-                        <ForeshadowGroup title="同大纲节点" items={relatedForeshadows.outline} />
-                      )}
-                      {relatedForeshadows.related.length > 0 && (
-                        <ForeshadowGroup title="相关文件" items={relatedForeshadows.related} />
-                      )}
+                      <p>
+                        {active.path}
+                        {active.outline_id && ` · 大纲：${outlineTitleById.get(active.outline_id) ?? active.outline_id}`}
+                      </p>
+                      <div className="chapter-detail-metrics">
+                        <span>{formatNumber(active.characters)} 字符</span>
+                        <span>目标 {formatNumber(active.target_characters || 0)}</span>
+                        <span>修订 {active.revision}</span>
+                      </div>
                     </div>
-                  </section>
-                )}
-                <section className="chapter-vector-panel">
+                    <div className="chapter-detail-actions">
+                      <button className="btn-secondary" onClick={() => onOpenFile(active.path)}>打开文件</button>
+                      <button className="btn-secondary" onClick={() => setEditing((value) => !value)}>
+                        {editing ? "预览" : "编辑"}
+                      </button>
+                      <button
+                        className="btn-primary"
+                        disabled={!changed || saving}
+                        onClick={() => void onSaveDocument(active.path, draft)}
+                      >
+                        {saving ? "保存中" : "保存"}
+                      </button>
+                    </div>
+                  </div>
+                  {editing ? (
+                    <textarea
+                      className="chapter-editor"
+                      value={draft}
+                      onChange={(event) => setDraft(event.target.value)}
+                      spellCheck={false}
+                    />
+                  ) : (
+                    <div className="chapter-content-surface">
+                      <MarkdownView content={active.content || "暂无内容"} />
+                    </div>
+                  )}
+                </section>
+
+                <section className="chapter-support-pane">
+                  <header className="chapter-support-heading">
+                    <div>
+                      <span>当前章节</span>
+                      <strong>{active.title}</strong>
+                    </div>
+                    <mark className={`chapter-status is-${active.status || "draft"}`}>{chapterStatusLabel(active.status)}</mark>
+                  </header>
+                  {active.summary && (
+                    <div className="chapter-summary">
+                      <strong>摘要</strong>
+                      <p>{active.summary}</p>
+                    </div>
+                  )}
+                  {relatedForeshadows.all.length > 0 && (
+                    <section className="chapter-foreshadow-panel">
+                      <header>
+                        <div>
+                          <h4>相关伏笔</h4>
+                          <p>
+                            {relatedForeshadows.payoff.length} 个计划回收 · {relatedForeshadows.planting.length} 个埋设 · {relatedForeshadows.outline.length} 个大纲关联
+                          </p>
+                        </div>
+                      </header>
+                      <div className="chapter-foreshadow-groups">
+                        {relatedForeshadows.payoff.length > 0 && (
+                          <ForeshadowGroup title="本章计划回收" items={relatedForeshadows.payoff} />
+                        )}
+                        {relatedForeshadows.planting.length > 0 && (
+                          <ForeshadowGroup title="本章埋设" items={relatedForeshadows.planting} />
+                        )}
+                        {relatedForeshadows.outline.length > 0 && (
+                          <ForeshadowGroup title="同大纲节点" items={relatedForeshadows.outline} />
+                        )}
+                        {relatedForeshadows.related.length > 0 && (
+                          <ForeshadowGroup title="相关文件" items={relatedForeshadows.related} />
+                        )}
+                      </div>
+                    </section>
+                  )}
+                  <section className="chapter-vector-panel">
                   <header>
                     <div>
                       <h4>向量辅助</h4>
@@ -398,8 +533,8 @@ export default function ChapterPanel({
                       ))}
                     </div>
                   )}
-                </section>
-                <section className="chapter-meta-panel">
+                  </section>
+                  <section className="chapter-meta-panel">
                   <header>
                     <h4>生产信息</h4>
                     <button
@@ -416,6 +551,14 @@ export default function ChapterPanel({
                       {saving ? "保存中" : "保存信息"}
                     </button>
                   </header>
+                  <CharacterReferences
+                    characters={characters}
+                    selectedIds={metadataDraft.character_ids}
+                    label="本章人物"
+                    disabled={saving}
+                    onChange={(characterIds) => setMetadataField("character_ids", characterIds)}
+                    onOpenCharacter={onOpenCharacter}
+                  />
                   <div className="chapter-meta-grid">
                     <label>
                       <span>状态</span>
@@ -478,17 +621,8 @@ export default function ChapterPanel({
                       <span style={{ width: progressWidth(active.characters, metadataDraft.target_characters || 0) }} />
                     </div>
                   </div>
+                  </section>
                 </section>
-                {editing ? (
-                  <textarea
-                    className="chapter-editor"
-                    value={draft}
-                    onChange={(event) => setDraft(event.target.value)}
-                    spellCheck={false}
-                  />
-                ) : (
-                  <MarkdownView content={active.content || "暂无内容"} />
-                )}
               </>
             ) : (
               <div className="chapter-empty">
@@ -498,6 +632,7 @@ export default function ChapterPanel({
             )}
           </section>
         </div>
+        </>
       )}
     </section>
   );

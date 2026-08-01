@@ -102,6 +102,23 @@ const WORLDVIEW_TEMPLATES = [
   },
 ];
 
+const WORLDVIEW_KIND_RULES = [
+  { id: "overview", label: "概览", keywords: ["overview", "概述", "总览"] },
+  { id: "geography", label: "地理", keywords: ["geography", "地理", "地区", "城市"] },
+  { id: "history", label: "历史", keywords: ["history", "timeline", "历史", "年表"] },
+  { id: "factions", label: "势力", keywords: ["faction", "势力", "组织"] },
+  { id: "power", label: "技术/力量", keywords: ["power", "magic", "tech", "技术", "魔法", "力量"] },
+  { id: "rules", label: "规则", keywords: ["rules", "规则", "限制"] },
+];
+
+function worldviewKind(path: string, title: string) {
+  const text = `${path}\n${title}`.toLowerCase();
+  return WORLDVIEW_KIND_RULES.find((rule) => rule.keywords.some((keyword) => text.includes(keyword.toLowerCase()))) ?? {
+    id: "other",
+    label: "其他",
+  };
+}
+
 interface WorldviewPanelProps {
   worldview: StoryWorldview | null;
   loading: boolean;
@@ -130,6 +147,8 @@ export default function WorldviewPanel({
   const updateTool = tools.find((tool) => tool.name === "update_worldview");
   const documents = worldview?.items ?? [];
   const [query, setQuery] = useState("");
+  const [kindFilter, setKindFilter] = useState("all");
+  const [sortMode, setSortMode] = useState("path");
   const [activePath, setActivePath] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState(false);
@@ -137,11 +156,29 @@ export default function WorldviewPanel({
   const [renamePath, setRenamePath] = useState("");
   const visibleDocuments = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    if (!normalized) return documents;
-    return documents.filter((doc) => `${doc.path}\n${doc.title}\n${doc.content}`.toLowerCase().includes(normalized));
-  }, [documents, query]);
+    const filtered = documents.filter((doc) => {
+      if (kindFilter !== "all" && worldviewKind(doc.path, doc.title).id !== kindFilter) return false;
+      if (!normalized) return true;
+      return `${doc.path}\n${doc.title}\n${doc.content}`.toLowerCase().includes(normalized);
+    });
+    return [...filtered].sort((a, b) => {
+      if (sortMode === "kind") return worldviewKind(a.path, a.title).label.localeCompare(worldviewKind(b.path, b.title).label, "zh-Hans-CN") || a.path.localeCompare(b.path, "zh-Hans-CN");
+      if (sortMode === "characters_desc") return b.content.length - a.content.length || a.path.localeCompare(b.path, "zh-Hans-CN");
+      if (sortMode === "characters_asc") return a.content.length - b.content.length || a.path.localeCompare(b.path, "zh-Hans-CN");
+      if (sortMode === "title") return a.title.localeCompare(b.title, "zh-Hans-CN") || a.path.localeCompare(b.path, "zh-Hans-CN");
+      return a.path.localeCompare(b.path, "zh-Hans-CN", { numeric: true });
+    });
+  }, [documents, kindFilter, query, sortMode]);
   const documentPaths = useMemo(() => new Set(documents.map((doc) => doc.path)), [documents]);
   const active = documents.find((doc) => doc.path === activePath) ?? visibleDocuments[0] ?? null;
+  const kindCount = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const doc of documents) {
+      const kind = worldviewKind(doc.path, doc.title).label;
+      map.set(kind, (map.get(kind) ?? 0) + 1);
+    }
+    return [...map.entries()];
+  }, [documents]);
 
   useEffect(() => {
     if (!active) {
@@ -216,13 +253,60 @@ export default function WorldviewPanel({
       {error && <p className="worldview-error">{error}</p>}
 
       {!loading && !error && (
+        <>
+        <section className="worldview-overview-strip" aria-label="世界观概览">
+          <div>
+            <span>文档</span>
+            <strong>{documents.length}</strong>
+          </div>
+          <div>
+            <span>分类</span>
+            <strong>{kindCount.length}</strong>
+          </div>
+          <div>
+            <span>总字符</span>
+            <strong>{new Intl.NumberFormat().format(documents.reduce((total, doc) => total + doc.content.length, 0))}</strong>
+          </div>
+          <div>
+            <span>来源</span>
+            <strong>{worldview?.source ?? "world"}</strong>
+          </div>
+        </section>
         <div className="worldview-layout">
           <aside className="worldview-list">
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索设定"
-            />
+            <div className="worldview-list-head">
+              <div>
+                <strong>设定资料库</strong>
+                <span>{visibleDocuments.length} / {documents.length}</span>
+              </div>
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="搜索设定"
+              />
+              <label className="worldview-sort-select">
+                <span>排序</span>
+                <select value={sortMode} onChange={(event) => setSortMode(event.target.value)}>
+                  <option value="path">路径</option>
+                  <option value="kind">类型</option>
+                  <option value="characters_desc">字数多到少</option>
+                  <option value="characters_asc">字数少到多</option>
+                  <option value="title">标题</option>
+                </select>
+              </label>
+              <div className="worldview-filter-row" aria-label="世界观类型筛选">
+                <button className={kindFilter === "all" ? "active" : ""} onClick={() => setKindFilter("all")}>全部</button>
+                {[...WORLDVIEW_KIND_RULES, { id: "other", label: "其他", keywords: [] }].map((kind) => (
+                  <button
+                    key={kind.id}
+                    className={kindFilter === kind.id ? "active" : ""}
+                    onClick={() => setKindFilter(kind.id)}
+                  >
+                    {kind.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="worldview-templates">
               <h3>主题模板</h3>
               <div className="worldview-template-grid">
@@ -254,8 +338,12 @@ export default function WorldviewPanel({
                   setRenaming(false);
                 }}
               >
-                <strong>{doc.title}</strong>
+                <div>
+                  <strong>{doc.title}</strong>
+                  <mark className={`worldview-kind is-${worldviewKind(doc.path, doc.title).id}`}>{worldviewKind(doc.path, doc.title).label}</mark>
+                </div>
                 <span>{doc.path}</span>
+                {doc.summary && <em>{doc.summary}</em>}
               </button>
             ))}
           </aside>
@@ -265,8 +353,17 @@ export default function WorldviewPanel({
               <>
                 <div className="worldview-detail-heading">
                   <div>
-                    <h3>{active.title}</h3>
+                    <div className="worldview-title-row">
+                      <h3>{active.title}</h3>
+                      <mark className={`worldview-kind is-${worldviewKind(active.path, active.title).id}`}>
+                        {worldviewKind(active.path, active.title).label}
+                      </mark>
+                    </div>
                     <p>{active.path}</p>
+                    <div className="worldview-detail-metrics">
+                      <span>{new Intl.NumberFormat().format(active.content.length)} 字符</span>
+                      <span>{active.content.split(/\r?\n/).length} 行</span>
+                    </div>
                   </div>
                   <div className="worldview-detail-actions">
                     <button className="btn-secondary" onClick={() => setRenaming((value) => !value)}>
@@ -315,7 +412,9 @@ export default function WorldviewPanel({
                     spellCheck={false}
                   />
                 ) : (
-                  <MarkdownView content={active.content || "暂无内容"} />
+                  <div className="worldview-content-surface">
+                    <MarkdownView content={active.content || "暂无内容"} />
+                  </div>
                 )}
               </>
             ) : (
@@ -326,6 +425,7 @@ export default function WorldviewPanel({
             )}
           </section>
         </div>
+        </>
       )}
     </section>
   );

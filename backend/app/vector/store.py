@@ -44,6 +44,14 @@ class NullVectorStore:
     async def index_file(self, file_path: str) -> None:
         return None
 
+    async def query_exact_terms(
+        self,
+        terms: list[str],
+        collections: list[str] | None = None,
+        top_k: int = 10,
+    ) -> list[dict]:
+        return []
+
     async def check_consistency(self, new_content: str) -> list[dict]:
         return []
 
@@ -86,6 +94,47 @@ class ProjectVectorStore(NullVectorStore):
             })
 
         results.sort(key=lambda item: item["score"], reverse=True)
+        return results[:top_k]
+
+    async def query_exact_terms(
+        self,
+        terms: list[str],
+        collections: list[str] | None = None,
+        top_k: int = 10,
+    ) -> list[dict]:
+        normalized_terms = self._normalize_exact_terms(terms)
+        if not normalized_terms:
+            return []
+
+        index = await self._load_or_build_index()
+        collection_set = set(collections or [])
+        results: list[dict[str, Any]] = []
+        for chunk in index.get("chunks", []):
+            if collection_set and chunk.get("collection") not in collection_set:
+                continue
+            content = str(chunk.get("text") or "")
+            path = str(chunk.get("path") or "")
+            score, matched_terms = self._exact_match_score(content, path, normalized_terms)
+            if score <= 0:
+                continue
+            results.append({
+                "path": path,
+                "collection": chunk.get("collection", "other"),
+                "content": content,
+                "score": round(score, 4),
+                "chunk_id": chunk["id"],
+                "match_type": "exact",
+                "matched_terms": matched_terms,
+            })
+
+        results.sort(
+            key=lambda item: (
+                item["score"],
+                -len(str(item.get("content") or "")),
+                str(item.get("path") or ""),
+            ),
+            reverse=True,
+        )
         return results[:top_k]
 
     async def index_file(self, file_path: str) -> None:
@@ -284,6 +333,49 @@ class ProjectVectorStore(NullVectorStore):
         if embedding_score > 0:
             return round(0.35 * lexical_score + 0.65 * embedding_score, 4)
         return round(lexical_score, 4)
+
+    def _normalize_exact_terms(self, terms: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for raw_term in terms:
+            term = re.sub(r"\s+", "", str(raw_term or "").strip().lower())
+            if len(term) < 2 or len(term) > 24 or term in seen:
+                continue
+            seen.add(term)
+            normalized.append(term)
+        return normalized[:16]
+
+    def _exact_match_score(self, content: str, path: str, terms: list[str]) -> tuple[float, list[str]]:
+        lowered_content = content.lower()
+        compact_content = re.sub(r"\s+", "", lowered_content)
+        compact_path = re.sub(r"\s+", "", path.lower())
+        leading_content = compact_content[:240]
+        first_line = re.sub(r"^[#\-*+>\s]+", "", lowered_content.splitlines()[0] if lowered_content else "")
+        compact_first_line = re.sub(r"\s+", "", first_line)
+        stripped_content = lowered_content.lstrip()
+        has_document_title = bool(
+            re.match(r"^#{1,6}\s+", stripped_content)
+            or re.match(r"^(?:name|title|姓名|名称)\s*[:：]", stripped_content)
+        )
+        score = 0.0
+        matched_terms: list[str] = []
+
+        for term in terms:
+            content_count = compact_content.count(term)
+            path_match = term in compact_path
+            if not content_count and not path_match:
+                continue
+            matched_terms.append(term)
+            term_weight = 1.0 + min(len(term), 8) / 8
+            score += min(content_count, 3) * term_weight
+            if path_match:
+                score += 4.0 * term_weight
+            if has_document_title and term in compact_first_line:
+                score += 6.0 * term_weight
+            elif term in leading_content:
+                score += 3.0 * term_weight
+
+        return score, matched_terms
 
     def _backend_name(self) -> str:
         return settings.vector_backend if settings.vector_backend in {"local", "chroma"} else "local"

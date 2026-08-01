@@ -119,7 +119,7 @@ class ProjectContext:
             "world/geography.md": "# 地理\n\n",
             "world/history.md": "# 历史\n\n",
             "world/rules.yaml": "# 世界规则\n",
-            "characters/index.yaml": "# 角色索引\n",
+            "characters/index.yaml": "schema_version: 1\ncharacters: []\n",
             "characters/relationships.json": "[]\n",
             "plot/outline.md": "# 大纲\n\n",
             "plot/timeline.json": "[]\n",

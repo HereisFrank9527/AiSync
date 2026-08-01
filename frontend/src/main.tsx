@@ -1,8 +1,6 @@
 import { Component, StrictMode, useEffect, useMemo, useState, type ErrorInfo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { invoke, isTauri } from "@tauri-apps/api/core";
 import App from "./App";
-import { ensureDesktopBackendStarted } from "./config/desktopBackend";
 
 const APP_VERSION = __AISYNC_APP_VERSION__;
 
@@ -32,18 +30,15 @@ function renderFatalError(error: unknown) {
 }
 
 function writeFrontendDiagnostics(message: string) {
-  if (!isTauri()) return;
-  void invoke("frontend_diagnostics", {
-    message: `[${new Date().toISOString()}] ${message}`,
-  }).catch(() => undefined);
+  console.debug(`[AiSync ${APP_VERSION}] ${message}`);
 }
 
 const BOOT_MESSAGES = [
-  "准备本地运行环境",
-  "选择后端服务端口",
-  "启动写作服务",
-  "等待健康检查",
-  "整理工作区入口",
+  "准备 Web 工作台",
+  "加载写作组件",
+  "连接后端服务",
+  "整理项目入口",
+  "恢复对话状态",
 ];
 
 class BootErrorBoundary extends Component<{ children: ReactNode }, { error: unknown }> {
@@ -73,28 +68,19 @@ class BootErrorBoundary extends Component<{ children: ReactNode }, { error: unkn
 }
 
 function Bootstrap() {
-  const [ready, setReady] = useState(!isTauri());
+  const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     writeFrontendDiagnostics(`frontend bootstrap ${APP_VERSION}`);
-    void ensureDesktopBackendStarted()
-      .then(() => {
-        writeFrontendDiagnostics("backend health check passed");
-      })
-      .catch((error) => {
-        console.error("Failed to start backend", error);
-        writeFrontendDiagnostics(`backend startup failed: ${error instanceof Error ? error.stack || error.message : String(error)}`);
-        if (!cancelled) setError(error instanceof Error ? error.message : String(error));
-      })
-      .finally(() => {
-        if (!cancelled) setReady(true);
-      });
+    const frame = window.requestAnimationFrame(() => {
+      if (!cancelled) setReady(true);
+    });
     return () => {
       cancelled = true;
+      window.cancelAnimationFrame(frame);
     };
   }, []);
 
@@ -111,29 +97,8 @@ function Bootstrap() {
     return BOOT_MESSAGES[Math.floor(elapsedSeconds / 2) % BOOT_MESSAGES.length];
   }, [elapsedSeconds]);
 
-  const copyDiagnostics = async () => {
-    if (!isTauri()) return;
-    try {
-      const diagnostics = await invoke<string>("backend_diagnostics");
-      await navigator.clipboard.writeText(diagnostics);
-      setDiagnosticsCopied(true);
-      window.setTimeout(() => setDiagnosticsCopied(false), 1800);
-    } catch (error) {
-      setError(`复制诊断信息失败：${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
-
-  const openLogs = async () => {
-    if (!isTauri()) return;
-    try {
-      await invoke("open_log_dir");
-    } catch (error) {
-      setError(`打开日志目录失败：${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
-
   if (error) {
-    return <div className="view-status view-status--error">后端启动失败：{error}</div>;
+    return <div className="view-status view-status--error">前端启动失败：{error}</div>;
   }
 
   if (!ready) {
@@ -144,17 +109,7 @@ function Bootstrap() {
           <div className="app-boot-spinner" aria-hidden="true" />
           <h1>AiSync {APP_VERSION}</h1>
           <p>{bootMessage}</p>
-          <p className="app-boot-subtext">正在启动后端服务，已等待 {elapsedSeconds} 秒</p>
-          {elapsedSeconds >= 8 && (
-            <div className="app-boot-actions">
-              <button className="btn-secondary" onClick={() => void copyDiagnostics()}>
-                {diagnosticsCopied ? "已复制" : "复制诊断"}
-              </button>
-              <button className="btn-secondary" onClick={() => void openLogs()}>
-                打开日志
-              </button>
-            </div>
-          )}
+          <p className="app-boot-subtext">正在加载 Web 前端，已等待 {elapsedSeconds} 秒</p>
         </div>
       </div>
     );

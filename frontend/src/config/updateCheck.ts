@@ -5,7 +5,7 @@ export interface UpdateAsset {
   name: string;
   url: string;
   size: number;
-  kind: "nsis" | "msi" | "zip" | "other";
+  kind: "zip" | "tar" | "other";
 }
 
 export interface UpdateInfo {
@@ -88,16 +88,14 @@ export function compareVersions(a: string, b: string) {
 }
 
 function classifyAsset(name: string): UpdateAsset["kind"] {
-  if (/setup\.exe$/i.test(name) || /-setup\.exe$/i.test(name)) return "nsis";
-  if (/\.msi$/i.test(name)) return "msi";
   if (/\.zip$/i.test(name)) return "zip";
+  if (/\.tar\.gz$|\.tgz$/i.test(name)) return "tar";
   return "other";
 }
 
 function choosePreferredAsset(assets: UpdateAsset[]) {
-  return assets.find((asset) => asset.kind === "nsis")
-    ?? assets.find((asset) => asset.kind === "msi")
-    ?? assets.find((asset) => asset.kind === "zip")
+  return assets.find((asset) => asset.kind === "zip")
+    ?? assets.find((asset) => asset.kind === "tar")
     ?? assets[0]
     ?? null;
 }
@@ -141,13 +139,6 @@ export async function checkLatestRelease(): Promise<UpdateInfo> {
 
 export async function openExternalUrl(url: string): Promise<boolean> {
   if (!url) return false;
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("open_external_url", { url });
-    return true;
-  } catch {
-    // fallback below
-  }
   if (typeof window !== "undefined") {
     const opened = window.open(url, "_blank", "noopener,noreferrer");
     return Boolean(opened);

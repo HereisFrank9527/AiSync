@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
 
 
 class ConnectionManager:
@@ -26,12 +26,12 @@ class ConnectionManager:
         exclude: WebSocket | None = None,
     ) -> None:
         stale: list[WebSocket] = []
-        for websocket in self._connections.get(project_id, set()):
+        for websocket in tuple(self._connections.get(project_id, set())):
             if websocket is exclude:
                 continue
             try:
                 await websocket.send_json(message)
-            except RuntimeError:
+            except (WebSocketDisconnect, RuntimeError, OSError):
                 stale.append(websocket)
         for websocket in stale:
             self.disconnect(project_id, websocket)

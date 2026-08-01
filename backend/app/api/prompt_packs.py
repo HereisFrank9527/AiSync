@@ -10,6 +10,7 @@ from app.core.prompt_pack_rendering import (
     load_project_prompt_pack_settings,
     save_project_prompt_pack_settings,
 )
+from app.core.prompt_pack_examples import prompt_pack_create_from_example, prompt_pack_examples
 from app.core.prompt_packs import (
     PromptPack,
     PromptPackCopy,
@@ -35,6 +36,19 @@ def project_context(project_path: str) -> ProjectContext:
 @router.get("")
 async def list_prompt_packs() -> list[PromptPack]:
     return prompt_pack_store.list_all()
+
+
+@router.get("/examples")
+async def list_prompt_pack_examples() -> list[dict[str, object]]:
+    return prompt_pack_examples()
+
+
+@router.post("/examples/{example_id}", status_code=201)
+async def create_prompt_pack_from_example(example_id: str) -> PromptPack:
+    data = prompt_pack_create_from_example(example_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Prompt pack example not found")
+    return prompt_pack_store.create(data)
 
 
 @router.get("/project-settings")

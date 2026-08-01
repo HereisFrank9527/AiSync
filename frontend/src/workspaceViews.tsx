@@ -9,6 +9,8 @@ import type {
   OutlineItem,
   StoryChapterMetadataUpdate,
   StoryChapters,
+  StoryCharacter,
+  StoryCharacterUpdate,
   StoryCharacters,
   StoryForeshadows,
   StoryOutline,
@@ -27,6 +29,8 @@ export interface WorkspaceViewContext {
     refresh: () => void;
     save: (title: string, items: OutlineItem[]) => void | Promise<unknown>;
     importMarkdown: () => void | Promise<unknown>;
+    saveSource: (content: string) => void | Promise<unknown>;
+    saveCharacters: (nodeId: string, characterIds: string[]) => void | Promise<unknown>;
   };
   chapters: {
     chapters: StoryChapters | null;
@@ -44,6 +48,7 @@ export interface WorkspaceViewContext {
     error: string;
     refresh: () => void;
     save: (items: ForeshadowItem[]) => void | Promise<unknown>;
+    confirmVerification: (foreshadowId: string) => void | Promise<unknown>;
   };
   vector: {
     status: VectorIndexStatus | null;
@@ -57,8 +62,13 @@ export interface WorkspaceViewContext {
   characters: {
     characters: StoryCharacters | null;
     loading: boolean;
+    saving: boolean;
     error: string;
     refresh: () => void;
+    save: (character: StoryCharacterUpdate) => StoryCharacter | null | void | Promise<StoryCharacter | null | void>;
+    archive: (slug: string, reason?: string) => void | Promise<unknown>;
+    restore: (archiveId: string) => void | Promise<unknown>;
+    focusedCharacterId: string | null;
   };
   worldview: {
     worldview: StoryWorldview | null;
@@ -73,6 +83,7 @@ export interface WorkspaceViewContext {
   tools: ToolDescriptor[];
   openTool: (tool: ToolDescriptor, initialParams?: Record<string, unknown>) => void;
   openFile: (path: string) => void;
+  openCharacter: (characterId: string) => void;
 }
 
 export interface WorkspaceViewDefinition {
@@ -83,42 +94,50 @@ export interface WorkspaceViewDefinition {
 export const WORKSPACE_VIEW_REGISTRY: WorkspaceViewDefinition[] = [
   {
     viewId: "outline",
-    render: ({ outline, chapters, tools, openTool }) => (
+    render: ({ outline, chapters, characters, tools, openTool, openCharacter }) => (
       <OutlinePanel
         outline={outline.outline}
         chapters={chapters.chapters}
+        characters={characters.characters}
         loading={outline.loading}
         error={outline.error}
         tools={tools}
         onRefresh={outline.refresh}
         onSave={outline.save}
         onImportMarkdown={outline.importMarkdown}
+        onSaveSource={outline.saveSource}
+        onSaveCharacters={outline.saveCharacters}
         onOpenTool={openTool}
+        onOpenCharacter={openCharacter}
       />
     ),
   },
   {
     viewId: "foreshadows",
-    render: ({ foreshadows, outline, chapters }) => (
+    render: ({ foreshadows, outline, chapters, characters, openCharacter }) => (
       <ForeshadowPanel
         foreshadows={foreshadows.foreshadows}
         outline={outline.outline}
         chapters={chapters.chapters}
+        characters={characters.characters}
         loading={foreshadows.loading}
         saving={foreshadows.saving}
         error={foreshadows.error}
         onRefresh={foreshadows.refresh}
         onSave={foreshadows.save}
+        onConfirmVerification={foreshadows.confirmVerification}
+        onOpenCharacter={openCharacter}
       />
     ),
   },
   {
     viewId: "chapters",
-    render: ({ outline, chapters, foreshadows, vector, tools, openTool, openFile }) => (
+    render: ({ outline, chapters, foreshadows, vector, characters, tools, openTool, openFile, openCharacter }) => (
       <ChapterPanel
         chapters={chapters.chapters}
         outline={outline.outline}
         foreshadows={foreshadows.foreshadows}
+        characters={characters.characters}
         loading={chapters.loading}
         saving={chapters.saving}
         error={chapters.error}
@@ -135,6 +154,7 @@ export const WORKSPACE_VIEW_REGISTRY: WorkspaceViewDefinition[] = [
         onVectorRebuild={vector.rebuild}
         onOpenTool={openTool}
         onOpenFile={openFile}
+        onOpenCharacter={openCharacter}
       />
     ),
   },
@@ -144,10 +164,15 @@ export const WORKSPACE_VIEW_REGISTRY: WorkspaceViewDefinition[] = [
       <CharacterPanel
         characters={characters.characters}
         loading={characters.loading}
+        saving={characters.saving}
         error={characters.error}
         tools={tools}
         onRefresh={characters.refresh}
+        onSaveCharacter={characters.save}
+        onArchiveCharacter={characters.archive}
+        onRestoreCharacter={characters.restore}
         onOpenTool={openTool}
+        focusedCharacterId={characters.focusedCharacterId}
       />
     ),
   },

@@ -44,9 +44,28 @@ export function useForeshadows(projectPath: string | null) {
     }
   }, [projectPath]);
 
+  const confirmVerification = useCallback(async (foreshadowId: string) => {
+    if (!projectPath) return null;
+    setSaving(true);
+    try {
+      const data = await api.post<StoryForeshadows>("/story/foreshadows/verification/confirm", {
+        project_path: projectPath,
+        foreshadow_id: foreshadowId,
+      });
+      setForeshadows(data);
+      setError("");
+      return data;
+    } catch {
+      setError("无法确认伏笔复核结果");
+      return null;
+    } finally {
+      setSaving(false);
+    }
+  }, [projectPath]);
+
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  return { foreshadows, loading, saving, error, refresh, save };
+  return { foreshadows, loading, saving, error, refresh, save, confirmVerification };
 }
