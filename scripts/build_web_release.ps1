@@ -79,7 +79,15 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
   [System.IO.Compression.CompressionLevel]::Optimal,
   $true
 )
-$hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$sha256 = [System.Security.Cryptography.SHA256]::Create()
+$zipStream = [System.IO.File]::OpenRead($zipPath)
+try {
+  $hashBytes = $sha256.ComputeHash($zipStream)
+} finally {
+  $zipStream.Dispose()
+  $sha256.Dispose()
+}
+$hash = ([System.BitConverter]::ToString($hashBytes) -replace "-", "").ToLowerInvariant()
 Set-Content -LiteralPath $hashPath -Value "$hash  $([System.IO.Path]::GetFileName($zipPath))" -Encoding ASCII
 
 $zip = Get-Item -LiteralPath $zipPath
