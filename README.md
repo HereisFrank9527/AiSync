@@ -182,6 +182,10 @@ powershell -ExecutionPolicy Bypass -File scripts/clean_build_artifacts.ps1
 - 没选择项目时 Agent 会显示未选择或未连接，这是正常状态
 - 中断不能强杀正在运行的工具内部逻辑，只会阻止后续 Agent 步骤或取消可取消的模型请求
 
+## 交流与反馈
+
+QQ 交流群：`370872213`
+
 ## 许可说明
 
 AiSync 采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。
